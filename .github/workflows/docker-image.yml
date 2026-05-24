@@ -5,6 +5,17 @@ on:
     tags: ["v*"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or commit to build
+        required: false
+        default: main
+      publish:
+        description: Push the built image to GHCR
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,13 +33,20 @@ jobs:
 
     steps:
       - name: Checkout repository
+        if: github.event_name != 'workflow_dispatch'
         uses: actions/checkout@v5
+
+      - name: Checkout selected ref
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -38,17 +56,37 @@ jobs:
       - name: Prepare image tags
         id: meta
         shell: bash
+        env:
+          SELECTED_REF: ${{ inputs.ref }}
+          SELECTED_PUBLISH: ${{ inputs.publish }}
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF}" == refs/tags/v* ]]; then
-            tags="${IMAGE_NAME}:${GITHUB_REF_NAME},${IMAGE_NAME}:latest"
-            version="${GITHUB_REF_NAME}"
-          else
+          publish="false"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
             tags="${IMAGE_NAME}:pr-${{ github.event.pull_request.number }}"
             version="pr-${{ github.event.pull_request.number }}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            publish="${SELECTED_PUBLISH}"
+            ref="${SELECTED_REF:-main}"
+            version="${ref#refs/tags/}"
+            version="${version#refs/heads/}"
+            version="${version//\//-}"
+            tags="${IMAGE_NAME}:${version}"
+
+            if [[ "${publish}" == "true" && "${version}" == v* ]]; then
+              tags="${tags},${IMAGE_NAME}:latest"
+            fi
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            tags="${IMAGE_NAME}:${GITHUB_REF_NAME}"
+            version="${GITHUB_REF_NAME}"
+          else
+            version="${GITHUB_REF_NAME//\//-}"
+            tags="${IMAGE_NAME}:${version}"
           fi
 
           echo "tags=${tags}" >> "${GITHUB_OUTPUT}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "publish=${publish}" >> "${GITHUB_OUTPUT}"
 
       - name: Build and optionally push Docker image
         uses: docker/build-push-action@v7
@@ -56,7 +94,7 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: ${{ env.PLATFORM }}
-          push: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+          push: ${{ steps.meta.outputs.publish == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
             NPM_REGISTRY=${{ env.NPM_REGISTRY }}

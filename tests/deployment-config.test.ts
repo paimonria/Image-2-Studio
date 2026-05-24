@@ -26,6 +26,30 @@ describe("deployment configuration guardrails", () => {
     assert.match(workflow, /APP_VERSION=\$\{\{ steps\.meta\.outputs\.version \}\}/);
   });
 
+  it("keeps Docker image publishing manually controlled", () => {
+    const workflow = read(".github/workflows/docker-image.yml");
+
+    assert.match(workflow, /workflow_dispatch:/);
+    assert.match(workflow, /ref:\s*\n\s+description: Branch, tag, or commit to build/);
+    assert.match(workflow, /publish:\s*\n\s+description: Push the built image to GHCR/);
+    assert.match(workflow, /type: boolean/);
+    assert.match(workflow, /default: false/);
+    assert.match(workflow, /if: github\.event_name == 'workflow_dispatch' && inputs\.publish/);
+    assert.match(workflow, /push: \$\{\{ steps\.meta\.outputs\.publish == 'true' \}\}/);
+    assert.doesNotMatch(workflow, /push: \$\{\{ github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/v'\) \}\}/);
+  });
+
+  it("publishes latest only for manual version refs", () => {
+    const workflow = read(".github/workflows/docker-image.yml");
+
+    assert.match(workflow, /version="\$\{ref#refs\/tags\/\}"/);
+    assert.match(workflow, /version="\$\{version#refs\/heads\/\}"/);
+    assert.match(workflow, /version="\$\{version\/\/\\\/\/-\}"/);
+    assert.match(workflow, /if \[\[ "\$\{publish\}" == "true" && "\$\{version\}" == v\* \]\]; then/);
+    assert.match(workflow, /tags="\$\{tags\},\$\{IMAGE_NAME\}:latest"/);
+    assert.match(workflow, /tags="\$\{IMAGE_NAME\}:\$\{GITHUB_REF_NAME\}"/);
+  });
+
   it("uses the public npm registry for Docker dependency installs", () => {
     const dockerfile = read("Dockerfile");
     const workflow = read(".github/workflows/docker-image.yml");
