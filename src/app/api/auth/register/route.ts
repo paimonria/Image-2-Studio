@@ -1,0 +1,37 @@
+import { NextResponse } from "next/server";
+import { createSession, hashPassword, normalizeEmail, toPublicUser } from "@/lib/server/auth";
+import { prisma } from "@/lib/server/db";
+import { getAppSettings } from "@/lib/server/provider-config";
+import { jsonError } from "@/lib/server/responses";
+
+export const runtime = "nodejs";
+
+export async function POST(request: Request) {
+  const settings = await getAppSettings();
+  if (!settings.registrationOpen) {
+    return jsonError("Registration is closed.", 403);
+  }
+
+  const body = (await request.json()) as { email?: string; password?: string };
+  const email = normalizeEmail(body.email ?? "");
+  const password = body.password ?? "";
+
+  if (!email || password.length < 8) {
+    return jsonError("Email and a password of at least 8 characters are required.");
+  }
+
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    return jsonError("Email is already registered.", 409);
+  }
+
+  const user = await prisma.user.create({
+    data: {
+      email,
+      passwordHash: await hashPassword(password)
+    }
+  });
+
+  await createSession(user.id);
+  return NextResponse.json({ user: toPublicUser(user) });
+}

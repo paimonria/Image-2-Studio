@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         String   @default("USER")
+  disabled     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions       Session[]
+  providerConfig ProviderConfig?
+  images         ImageRecord[]
+  usage          UsageDaily[]
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  tokenHash    String   @unique
+  userId       String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model ProviderConfig {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  activeProvider      String?
+  openaiKeyEncrypted  String?
+  falKeyEncrypted     String?
+  openaiBaseUrl       String?
+  openaiModel         String?
+  falModel            String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PlatformProviderConfig {
+  id                 String   @id @default("platform")
+  openaiKeyEncrypted String?
+  falKeyEncrypted    String?
+  openaiBaseUrl      String?
+  openaiModel        String?
+  falModel           String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model AppSetting {
+  id                 String   @id @default("settings")
+  registrationOpen   Boolean  @default(false)
+  dailyPlatformQuota Int      @default(20)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model ImageRecord {
+  id             String   @id @default(cuid())
+  userId         String
+  provider       String
+  model          String
+  mode           String
+  prompt         String
+  filePath       String
+  mimeType       String
+  size           String?
+  aspectRatio    String?
+  quality        String?
+  inputFidelity  String?
+  sourceImageIds String   @default("[]")
+  uploadImageIds String   @default("[]")
+  parentId       String?
+  providerMeta   String?
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([provider])
+  @@index([model])
+}
+
+model StoredImage {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String
+  filePath  String
+  mimeType  String
+  filename  String
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model UsageDaily {
+  id           String   @id @default(cuid())
+  userId       String
+  date         String
+  platformUses Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+}
