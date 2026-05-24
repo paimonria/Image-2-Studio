@@ -2,7 +2,7 @@ param(
   [string]$ImageName = "ghcr.io/pairmeng/image-2-studio",
   [string]$Tag = "",
   [string]$Platform = "linux/amd64",
-  [string]$NpmRegistry = "https://mirrors.cloud.tencent.com/npm/",
+  [string]$NpmRegistry = "https://registry.npmjs.org/",
   [string]$PnpmVersion = "11.1.2",
   [string]$CacheRef = "",
   [switch]$NoCache,

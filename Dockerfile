@@ -4,7 +4,7 @@ FROM node:22-alpine AS base
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 ARG PNPM_VERSION=11.1.2
-ARG NPM_REGISTRY=https://mirrors.cloud.tencent.com/npm/
+ARG NPM_REGISTRY=https://registry.npmjs.org/
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 ENV npm_config_registry=${NPM_REGISTRY}
 ENV PNPM_HOME=/pnpm
@@ -16,7 +16,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm config set registry ${NPM_REGISTRY} \
   && pnpm config set store-dir /pnpm/store \
-  && pnpm install --frozen-lockfile \
+  && CI=true pnpm install --frozen-lockfile \
     --network-concurrency=4 \
     --fetch-retries=5 \
     --fetch-retry-factor=2 \

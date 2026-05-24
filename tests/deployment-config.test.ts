@@ -26,6 +26,15 @@ describe("deployment configuration guardrails", () => {
     assert.match(workflow, /APP_VERSION=\$\{\{ steps\.meta\.outputs\.version \}\}/);
   });
 
+  it("uses the public npm registry for Docker dependency installs", () => {
+    const dockerfile = read("Dockerfile");
+    const workflow = read(".github/workflows/docker-image.yml");
+
+    assert.match(dockerfile, /ARG NPM_REGISTRY=https:\/\/registry\.npmjs\.org\//);
+    assert.match(dockerfile, /CI=true pnpm install --frozen-lockfile/);
+    assert.match(workflow, /NPM_REGISTRY:\s+https:\/\/registry\.npmjs\.org\//);
+  });
+
   it("uses a noninteractive lint command", () => {
     const packageJson = JSON.parse(read("package.json")) as { scripts?: Record<string, string> };
 

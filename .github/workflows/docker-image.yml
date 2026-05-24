@@ -13,7 +13,7 @@ permissions:
 env:
   IMAGE_NAME: ghcr.io/pairmeng/image-2-studio
   PLATFORM: linux/amd64
-  NPM_REGISTRY: https://mirrors.cloud.tencent.com/npm/
+  NPM_REGISTRY: https://registry.npmjs.org/
   PNPM_VERSION: 11.1.2
 
 jobs:
