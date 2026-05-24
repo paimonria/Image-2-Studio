@@ -1,27 +1,37 @@
 import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { compare, hash } from "bcryptjs";
-import type { User } from "@prisma/client";
 import { prisma } from "./db";
 import { sha256 } from "./crypto";
 import { AppError } from "./errors";
+import type { PublicUser } from "../types";
 
 export const SESSION_COOKIE = "image2_session";
 const SESSION_DAYS = 30;
+const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 
-export type PublicUser = {
+export function toPublicUser(user: {
   id: string;
   email: string;
-  role: "ADMIN" | "USER";
+  role: string;
   disabled: boolean;
-};
+  jobMonitorClearedAt?: Date | string | null;
+  jobMonitorFinishedClearedAt?: Date | string | null;
+}): PublicUser {
+  const jobMonitorClearedAt = user.jobMonitorClearedAt instanceof Date
+    ? user.jobMonitorClearedAt.toISOString()
+    : user.jobMonitorClearedAt ?? null;
+  const jobMonitorFinishedClearedAt = user.jobMonitorFinishedClearedAt instanceof Date
+    ? user.jobMonitorFinishedClearedAt.toISOString()
+    : user.jobMonitorFinishedClearedAt ?? null;
 
-export function toPublicUser(user: Pick<User, "id" | "email" | "role" | "disabled">): PublicUser {
   return {
     id: user.id,
     email: user.email,
     role: user.role === "ADMIN" ? "ADMIN" : "USER",
-    disabled: user.disabled
+    disabled: user.disabled,
+    jobMonitorClearedAt,
+    jobMonitorFinishedClearedAt
   };
 }
 
@@ -110,10 +120,12 @@ export async function getCurrentUser() {
     return null;
   }
 
-  await prisma.session.update({
-    where: { id: session.id },
-    data: { lastSeenAt: new Date() }
-  });
+  if (Date.now() - session.lastSeenAt.getTime() > SESSION_TOUCH_INTERVAL_MS) {
+    await prisma.session.update({
+      where: { id: session.id },
+      data: { lastSeenAt: new Date() }
+    });
+  }
 
   return session.user;
 }

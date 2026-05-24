@@ -13,6 +13,8 @@ model User {
   passwordHash String
   role         String   @default("USER")
   disabled     Boolean  @default(false)
+  jobMonitorClearedAt DateTime?
+  jobMonitorFinishedClearedAt DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -20,6 +22,10 @@ model User {
   providerConfig ProviderConfig?
   images         ImageRecord[]
   imageJobs      ImageJob[]
+  imageBatches   ImageBatch[]
+  imageBatchItems ImageBatchItem[]
+  imageProjects  ImageProject[]
+  promptTemplates PromptTemplate[]
   usage          UsageDaily[]
 }
 
@@ -42,10 +48,8 @@ model ProviderConfig {
   userId              String   @unique
   activeProvider      String?
   openaiKeyEncrypted  String?
-  falKeyEncrypted     String?
   openaiBaseUrl       String?
   openaiModel         String?
-  falModel            String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -55,10 +59,8 @@ model ProviderConfig {
 model PlatformProviderConfig {
   id                 String   @id @default("platform")
   openaiKeyEncrypted String?
-  falKeyEncrypted    String?
   openaiBaseUrl      String?
   openaiModel        String?
-  falModel           String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
@@ -69,6 +71,7 @@ model AppSetting {
   dailyPlatformQuota Int      @default(20)
   siteTitle          String?
   faviconUrl         String?
+  logoUrl            String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
@@ -89,12 +92,20 @@ model ImageRecord {
   sourceImageIds String   @default("[]")
   uploadImageIds String   @default("[]")
   parentId       String?
+  batchId        String?
+  batchItemId    String?
+  projectId      String?
+  tags           String   @default("[]")
   providerMeta   String?
   createdAt      DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batch ImageBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  project ImageProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
-  @@index([userId, createdAt])
+  @@index([userId, createdAt, id])
+  @@index([userId, batchId])
+  @@index([userId, projectId])
   @@index([provider])
   @@index([model])
 }
@@ -108,17 +119,117 @@ model ImageJob {
   mode        String
   prompt      String
   requestJson String
+  batchId     String?
+  batchItemId String?
   resultId    String?
   error       String?
+  lockedBy    String?
+  lockedAt    DateTime?
+  heartbeatAt DateTime?
   startedAt   DateTime?
   finishedAt  DateTime?
+  queueWaitMs Int?
+  executionMs Int?
+  upstreamMs  Int?
+  fileSaveMs  Int?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batch ImageBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
+  @@index([userId, status])
+  @@index([userId, batchId])
+  @@index([batchItemId])
   @@index([status, createdAt])
+  @@index([status, lockedAt])
+  @@index([status, heartbeatAt])
+  @@index([lockedBy, status])
+}
+
+model ImageBatch {
+  id           String    @id @default(cuid())
+  userId       String
+  name         String
+  provider     String
+  model        String
+  mode         String
+  status       String    @default("queued")
+  totalCount   Int
+  successCount Int       @default(0)
+  failedCount  Int       @default(0)
+  promptFormat String    @default("blocks")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  finishedAt   DateTime?
+
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items   ImageBatchItem[]
+  jobs    ImageJob[]
+  records ImageRecord[]
+
+  @@index([userId, createdAt])
+  @@index([userId, status])
+}
+
+model ImageBatchItem {
+  id         String    @id @default(cuid())
+  batchId    String
+  userId     String
+  itemIndex  Int
+  provider   String
+  model      String
+  mode       String
+  prompt     String
+  status     String    @default("queued")
+  jobId      String?
+  resultId   String?
+  error      String?
+  retryCount Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  batch ImageBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, itemIndex])
+  @@index([userId, status])
+  @@index([batchId, status])
+  @@index([jobId])
+}
+
+model ImageProject {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  color     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images ImageRecord[]
+
+  @@unique([userId, name])
+  @@index([userId, createdAt])
+}
+
+model PromptTemplate {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  category  String   @default("Default")
+  mode      String   @default("universal")
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, mode])
 }
 
 model StoredImage {

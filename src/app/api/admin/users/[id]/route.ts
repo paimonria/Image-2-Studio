@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { hashPassword, requireAdmin, toPublicUser } from "@/lib/server/auth";
 import { prisma } from "@/lib/server/db";
-import { handleRouteError } from "@/lib/server/responses";
+import { handleRouteError, jsonError } from "@/lib/server/responses";
 
 export const runtime = "nodejs";
 
@@ -39,6 +39,43 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     });
 
     return NextResponse.json({ user: toPublicUser(user) });
+  } catch (error) {
+    return handleRouteError(error);
+  }
+}
+
+export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const admin = await requireAdmin();
+    const { id } = await context.params;
+
+    if (id === admin.id) {
+      return jsonError("You cannot delete your own admin account.", 400);
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id }
+    });
+
+    if (!user) {
+      return jsonError("User not found.", 404);
+    }
+
+    if (user.role === "ADMIN") {
+      const adminCount = await prisma.user.count({
+        where: { role: "ADMIN" }
+      });
+
+      if (adminCount <= 1) {
+        return jsonError("Cannot delete the last admin account.", 400);
+      }
+    }
+
+    await prisma.user.delete({
+      where: { id }
+    });
+
+    return NextResponse.json({ ok: true });
   } catch (error) {
     return handleRouteError(error);
   }

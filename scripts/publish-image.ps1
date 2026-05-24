@@ -4,6 +4,8 @@ param(
   [string]$Platform = "linux/amd64",
   [string]$NpmRegistry = "https://mirrors.cloud.tencent.com/npm/",
   [string]$PnpmVersion = "11.1.2",
+  [string]$CacheRef = "",
+  [switch]$NoCache,
   [switch]$NoLatest
 )
 
@@ -26,9 +28,21 @@ if (-not $Tag) {
   $Tag = Get-DefaultTag
 }
 
+if (-not $CacheRef) {
+  $CacheRef = "${ImageName}:buildcache"
+}
+
 $tags = @("-t", "${ImageName}:${Tag}")
 if (-not $NoLatest) {
   $tags += @("-t", "${ImageName}:latest")
+}
+
+$cacheArgs = @()
+if (-not $NoCache) {
+  $cacheArgs = @(
+    "--cache-from", "type=registry,ref=$CacheRef",
+    "--cache-to", "type=registry,ref=$CacheRef,mode=max"
+  )
 }
 
 Write-Host "Publishing Docker image:" -ForegroundColor Cyan
@@ -36,6 +50,9 @@ Write-Host "  image:    $ImageName"
 Write-Host "  tag:      $Tag"
 Write-Host "  platform: $Platform"
 Write-Host "  registry: $NpmRegistry"
+if (-not $NoCache) {
+  Write-Host "  cache:    $CacheRef"
+}
 if (-not $NoLatest) {
   Write-Host "  latest:   ${ImageName}:latest"
 }
@@ -47,6 +64,7 @@ docker buildx build `
   --build-arg "NPM_REGISTRY=$NpmRegistry" `
   --build-arg "PNPM_VERSION=$PnpmVersion" `
   @tags `
+  @cacheArgs `
   --push `
   .
 

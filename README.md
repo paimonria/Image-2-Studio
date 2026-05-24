@@ -2,7 +2,7 @@
 
 Chinese documentation: [README.zh.md](./README.zh.md)
 
-Image-2 Studio is a multi-user, chat-style AI image generation app. It supports OpenAI `gpt-image-2`, OpenAI-compatible gateways, and fal provider adapters.
+Image-2 Studio is a multi-user, chat-style AI image generation app. It supports OpenAI `gpt-image-2` and OpenAI-compatible gateways.
 
 ## Features
 
@@ -11,8 +11,9 @@ Image-2 Studio is a multi-user, chat-style AI image generation app. It supports 
 - Per-user API keys, image history, uploaded images, and generated images.
 - User API keys take priority over platform API keys.
 - API keys are encrypted with `APP_SECRET`.
-- OpenAI supports text-to-image, image-to-image, and continue edit.
-- fal currently supports text-to-image.
+- OpenAI-compatible image models support text-to-image, image-to-image, and continue edit when the gateway exposes compatible behavior.
+- Playground-style image workspace with a bright liquid-glass layout, top history search, bottom composer, and collapsible generation parameters.
+- History search and filtering with favorites, multi-select, copy links, download actions, and continue-edit shortcuts.
 - Generated and uploaded images are stored under `storage/` and served through protected API routes.
 
 ## Local Development
@@ -42,11 +43,33 @@ INITIAL_ADMIN_EMAIL=admin@example.com
 INITIAL_ADMIN_PASSWORD=replace-with-a-strong-admin-password
 ```
 
+If API routes fail with a Prisma `P2022` error such as a missing `AppSetting.siteTitle` column, sync the local SQLite schema and restart the dev server:
+
+```powershell
+pnpm.cmd run db:push
+pnpm.cmd run db:generate
+pnpm.cmd dev
+```
+
+Local Windows builds intentionally do not emit `.next/standalone` by default. Use the normal build command for local validation:
+
+```powershell
+pnpm.cmd run build
+```
+
+Docker image builds still produce a standalone Next.js server because the `Dockerfile` sets `NEXT_STANDALONE=true` before `pnpm build`. If you manually need a standalone build outside Docker, run:
+
+```powershell
+$env:NEXT_STANDALONE="true"; pnpm.cmd run build
+```
+
+With pnpm on Windows, standalone builds may require Developer Mode or an elevated shell because Next.js copies traced dependencies with symlinks.
+
 ## Docker Deployment: Server Pulls Image Only
 
 Production deployment should use the prebuilt GHCR image. The server only pulls and starts the image; all package installation and image building happen before the image reaches the server.
 
-GitHub Actions builds and pushes this image only when a `v*` version tag is pushed, for example `v1.0.6`:
+GitHub Actions builds and pushes this image only when a `v*` version tag is pushed, for example `v1.2.18`:
 
 ```text
 ghcr.io/pairmeng/image-2-studio:latest
@@ -69,7 +92,7 @@ cp .env.example .env
 nano .env
 ```
 
-Required for built-in PostgreSQL:
+Required for the default bundled PostgreSQL and Redis stack:
 
 ```env
 IMAGE_NAME=ghcr.io/pairmeng/image-2-studio
@@ -93,9 +116,37 @@ Optional platform provider settings:
 OPENAI_API_KEY=
 OPENAI_BASE_URL=
 OPENAI_IMAGE_MODEL=
-FAL_KEY=
-FAL_IMAGE_MODEL=
 ```
+
+Image job concurrency is limited inside each app container:
+
+```env
+IMAGE_JOB_CONCURRENCY=2
+IMAGE_JOB_USER_CONCURRENCY=1
+```
+
+The default container limit is `2`. Raise it gradually to `4`, `6`, and at most `8` after checking `/api/health` job queue metrics, memory, CPU, PostgreSQL connections, and upstream gateway latency. `IMAGE_JOB_USER_CONCURRENCY` limits how many slots one user can occupy in one container; the default is half the container limit, rounded up. Lower either value if the upstream gateway is slow, file storage is busy, or memory is tight. The per-container value multiplies by the number of running app containers.
+
+The default `docker-compose.yml` includes Redis and a worker container. To use an external Redis provider, set `REDIS_URL` in `.env`; the same value is passed to both the web and worker containers:
+
+```env
+REDIS_URL=redis://:password@redis.example.com:6379/0
+# Use rediss://:password@redis.example.com:6380/0 if your Redis provider requires TLS.
+IMAGE_QUEUE_PREFIX=image2
+IMAGE_WORKER_CONCURRENCY=8
+IMAGE_QUEUE_ATTEMPTS=3
+IMAGE_QUEUE_BACKOFF_MS=5000
+WORKER_DATABASE_CONNECTION_LIMIT=10
+```
+
+When Redis is enabled, the web container enqueues image jobs into BullMQ and does not generate images itself. The `image-2-worker` service consumes the Redis queue. Scale workers for throughput:
+
+```bash
+docker compose up -d --scale image-2-worker=4
+docker compose logs -f image-2-worker
+```
+
+With `IMAGE_WORKER_CONCURRENCY=8` and four worker containers, the target generation concurrency is about `32`, subject to upstream provider limits, Redis throughput, PostgreSQL connections, CPU, memory, and shared storage IO. Bare `pnpm dev` without `REDIS_URL` still uses the built-in in-process scheduler, but Docker runs use Redis by default.
 
 For temporary HTTP testing through `http://SERVER_IP:APP_PORT`, add:
 
@@ -105,7 +156,7 @@ AUTH_COOKIE_SECURE=false
 
 Do not use `AUTH_COOKIE_SECURE=false` for a real HTTPS deployment.
 
-### 3. Start with Built-in PostgreSQL
+### 3. Start With Bundled PostgreSQL and Redis
 
 One-line start command:
 
@@ -128,51 +179,35 @@ http://SERVER_IP:3000
 
 If `APP_PORT` is changed, use that host port instead.
 
-### 4. Start with External PostgreSQL
-
-Set `DATABASE_URL` in `.env`:
+The container runs database migrations automatically before `node server.js` starts. Default startup behavior:
 
 ```env
-DATABASE_URL=postgresql://db_user:db_password@db_host:5432/db_name?schema=public
+DB_MIGRATE_ON_START=true
+DB_MIGRATE_ATTEMPTS=12
+DB_MIGRATE_RETRY_SECONDS=5
 ```
 
-Then edit `docker-compose.yml`:
+Set `DB_MIGRATE_ON_START=false` only if you run `prisma migrate deploy --schema prisma/schema.active.prisma` yourself before starting the app.
 
-- Delete the entire `postgres:` service.
-- Delete the bottom `volumes: postgres-data:` block.
-- Delete `depends_on` from `image-2-studio`.
-- Delete this internal database override from `image-2-studio.environment`:
+### 4. Switch to External PostgreSQL or Redis
 
-```yaml
-DATABASE_URL: postgresql://image2:${POSTGRES_PASSWORD:-change-me}@postgres:5432/image2?schema=public
+The single `docker-compose.yml` contains all services. If you want an external PostgreSQL database, set `DOCKER_DATABASE_URL` in `.env`:
+
+```env
+DOCKER_DATABASE_URL=postgresql://db_user:db_password@db_host:5432/db_name?schema=public&connection_limit=10
 ```
 
-Keep `env_file: [.env]`, so the app reads the external `DATABASE_URL` from `.env`.
+If you want an external Redis provider, set `REDIS_URL` in `.env`, or edit the two `REDIS_URL` lines in `docker-compose.yml`.
 
-Then start with the same Compose file:
-
-One-line start command:
-
-```bash
-docker compose pull image-2-studio && docker compose up -d && docker compose ps && docker compose logs -f image-2-studio
-```
-
-```bash
-docker compose pull image-2-studio
-docker compose up -d
-docker compose ps
-docker compose logs -f image-2-studio
-```
-
-The external database account must be allowed to run Prisma migrations.
+The external PostgreSQL account must be allowed to run Prisma migrations. If you want to stop running the bundled services, remove or comment out the `postgres` or `redis` service blocks and the matching `depends_on` entries in `docker-compose.yml`.
 
 ### 5. Update
 
 Publish a new image by creating and pushing a version tag after the release commit is on `main`:
 
 ```bash
-git tag -a v1.0.6 -m "v1.0.6"
-git push origin v1.0.6
+git tag -a v1.2.18 -m "v1.2.18"
+git push origin v1.2.18
 ```
 
 After GitHub Actions finishes, update the server.
@@ -183,23 +218,50 @@ One-line update command:
 docker compose pull image-2-studio && docker compose up -d && docker compose ps
 ```
 
-Built-in PostgreSQL:
+Default stack:
 
 ```bash
-docker compose pull image-2-studio
+docker compose pull image-2-studio image-2-worker
 docker compose up -d
 docker compose ps
 ```
 
-External PostgreSQL:
+Worker containers:
 
 ```bash
-docker compose pull image-2-studio
-docker compose up -d
-docker compose ps
+docker compose pull image-2-worker
+docker compose up -d --scale image-2-worker=4
+docker compose logs -f image-2-worker
 ```
 
 The container entrypoint runs Prisma migrations before starting Next.js.
+
+### Release Checklist
+
+Before tagging a release, run the local gates from a clean working tree:
+
+```powershell
+pnpm.cmd run db:validate
+pnpm.cmd run lint
+pnpm.cmd run test:jobs
+pnpm.cmd exec tsc -p tsconfig.worker.json --noEmit
+pnpm.cmd run build
+pnpm.cmd run test:e2e
+```
+
+The E2E smoke test mocks image APIs and does not call the real provider.
+
+After pushing the release tag and pulling the image on a Docker host, verify the full default runtime:
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps
+docker compose logs --tail=120 image-2-worker
+curl http://127.0.0.1:3000/api/health
+```
+
+The health response should report `backend=redis`, `queue.ok=true`, and BullMQ `waiting` or `active` movement when a new background image task is submitted.
 
 ### 6. Roll Back
 
@@ -216,7 +278,7 @@ docker compose pull image-2-studio
 docker compose up -d
 ```
 
-For external PostgreSQL, use the edited `docker-compose.yml` described above.
+For external PostgreSQL or Redis, use your edited `docker-compose.yml`.
 
 ### 7. Health and Logs
 
@@ -224,9 +286,10 @@ For external PostgreSQL, use the edited `docker-compose.yml` described above.
 curl http://127.0.0.1:${APP_PORT:-3000}/api/health
 docker compose ps
 docker compose logs -f image-2-studio
+docker compose logs -f image-2-worker
 ```
 
-For external PostgreSQL, use the edited `docker-compose.yml` described above.
+For external PostgreSQL or Redis, use your edited `docker-compose.yml`.
 
 ### 8. Stop
 
@@ -236,7 +299,7 @@ Stop but keep data:
 docker compose down
 ```
 
-Stop and delete the built-in PostgreSQL volume. This deletes database data and should be used carefully:
+Stop and delete the bundled PostgreSQL and Redis volumes. This deletes database and queue data and should be used carefully:
 
 ```bash
 docker compose down -v
@@ -244,12 +307,13 @@ docker compose down -v
 
 ## Persistence
 
-Built-in PostgreSQL deployment persists:
+The default bundled deployment persists:
 
 - PostgreSQL data in Docker volume `postgres-data`.
+- Redis data in Docker volume `redis-data`.
 - Uploaded and generated image files in `./storage`.
 
-Do not delete `storage/` or the `postgres-data` volume unless you intentionally want to remove data.
+Do not delete `storage/`, `postgres-data`, or `redis-data` unless you intentionally want to remove data.
 
 ## Backup and Restore
 
@@ -297,6 +361,10 @@ server {
 ```
 
 Image generation can take a while. Keep `proxy_read_timeout` at `300s` or higher to avoid premature `504 Gateway Time-out` responses.
+
+Each app container runs at most `IMAGE_JOB_CONCURRENCY` image jobs at the same time, and each user can occupy at most `IMAGE_JOB_USER_CONCURRENCY` slots per container. Extra jobs remain pending and are picked up from the database as running jobs finish. `/api/health` includes the current queue snapshot, recent success/failure counts, average queue wait, upstream time, and file-save time.
+
+The image job scheduler uses lightweight database leases and heartbeats on `ImageJob`, so multiple app containers can claim pending jobs without executing the same job twice. A killed container leaves its running jobs leased until the heartbeat becomes stale; after the timeout they are marked failed and platform quota is refunded.
 
 For 1Panel/OpenResty, add the same timeout directives to the website reverse proxy advanced configuration, then reload or restart OpenResty. If the browser fails at about 60 seconds but `docker compose logs -f image-2-studio` shows the generation request failing later, the site reverse proxy is closing the client request first. If the container log itself shows `524`, inspect the logged `baseUrlHost` and check the upstream gateway chain.
 
@@ -347,7 +415,7 @@ docker compose up -d
 ```text
 src/app/                  Next.js pages and API routes
 src/lib/server/           Server database, auth, files, and provider config
-src/lib/server/providers/ OpenAI and fal provider adapters
+src/lib/server/providers/ OpenAI provider adapter
 prisma/                   Prisma schema and migrations
 scripts/                  Prisma schema switching and Docker entrypoint
 storage/                  Protected uploaded and generated images

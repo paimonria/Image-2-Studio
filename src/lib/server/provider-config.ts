@@ -11,6 +11,13 @@ export type PublicProviderConfig = {
   keys: Record<ProviderId, { configured: boolean; source: ProviderSource }>;
   baseUrls: Partial<Record<ProviderId, string>>;
   models: Partial<Record<ProviderId, string>>;
+  supportsCustomSize?: Partial<Record<ProviderId, boolean>>;
+};
+
+export type PublicPlatformProviderConfig = {
+  keys: Record<ProviderId, { configured: boolean }>;
+  baseUrls: Partial<Record<ProviderId, string>>;
+  models: Partial<Record<ProviderId, string>>;
 };
 
 export type ResolvedProviderConfig = {
@@ -18,6 +25,15 @@ export type ResolvedProviderConfig = {
   baseUrl: string;
   model: string;
   source: ProviderSource;
+};
+
+type AppSettings = {
+  id: string;
+  registrationOpen: boolean;
+  dailyPlatformQuota: number;
+  siteTitle?: string | null;
+  faviconUrl?: string | null;
+  logoUrl?: string | null;
 };
 
 export function sanitizeSiteTitle(value: unknown) {
@@ -43,47 +59,53 @@ export function sanitizeFaviconUrl(value: unknown) {
   return undefined;
 }
 
-export function getPublicBranding(settings: { siteTitle?: string | null; faviconUrl?: string | null }) {
+export function sanitizeLogoUrl(value: unknown) {
+  return sanitizeFaviconUrl(value);
+}
+
+export function getPublicBranding(settings: { siteTitle?: string | null; faviconUrl?: string | null; logoUrl?: string | null }) {
   return {
     siteTitle: settings.siteTitle?.trim() || DEFAULT_SITE_TITLE,
-    faviconUrl: settings.faviconUrl?.trim() || ""
+    faviconUrl: settings.faviconUrl?.trim() || "",
+    logoUrl: settings.logoUrl?.trim() || ""
   };
 }
 
-function getEnvKey(provider: ProviderId) {
-  if (provider === "openai") return process.env.OPENAI_API_KEY ?? "";
-  return process.env.FAL_KEY ?? "";
+function getEnvKey(_provider: ProviderId) {
+  return process.env.OPENAI_API_KEY ?? "";
 }
 
-function getEnvBaseUrl(provider: ProviderId) {
-  if (provider === "openai") return process.env.OPENAI_BASE_URL ?? "";
-  return "";
+function getEnvBaseUrl(_provider: ProviderId) {
+  return process.env.OPENAI_BASE_URL ?? "";
 }
 
-function getEnvModel(provider: ProviderId) {
-  if (provider === "openai") return process.env.OPENAI_IMAGE_MODEL ?? "";
-  if (provider === "fal") return process.env.FAL_IMAGE_MODEL ?? "";
-  return "";
+function getEnvModel(_provider: ProviderId) {
+  return process.env.OPENAI_IMAGE_MODEL ?? "";
 }
 
-function providerFields(provider: ProviderId) {
-  if (provider === "openai") {
-    return {
-      key: "openaiKeyEncrypted",
-      baseUrl: "openaiBaseUrl",
-      model: "openaiModel"
-    } as const;
-  }
-
+function providerFields(_provider: ProviderId) {
   return {
-    key: "falKeyEncrypted",
-    baseUrl: undefined,
-    model: "falModel"
+    key: "openaiKeyEncrypted",
+    baseUrl: "openaiBaseUrl",
+    model: "openaiModel"
   } as const;
 }
 
 function toProviderId(value: string | null | undefined): ProviderId | undefined {
-  return value === "openai" || value === "fal" ? value : undefined;
+  return value === "openai" ? value : undefined;
+}
+
+const DEFAULT_APP_SETTINGS: AppSettings = {
+  id: "settings",
+  registrationOpen: false,
+  dailyPlatformQuota: 20,
+  siteTitle: null,
+  faviconUrl: null,
+  logoUrl: null
+};
+
+export async function readAppSettings(): Promise<AppSettings> {
+  return await prisma.appSetting.findUnique({ where: { id: "settings" } }) ?? DEFAULT_APP_SETTINGS;
 }
 
 export async function getAppSettings() {
@@ -94,16 +116,21 @@ export async function getAppSettings() {
   });
 }
 
-export async function getResolvedProviderConfig(userId: string, provider: ProviderId): Promise<ResolvedProviderConfig> {
-  const fields = providerFields(provider);
+async function getProviderConfigSnapshot(userId: string) {
   const [userConfig, platformConfig] = await Promise.all([
     prisma.providerConfig.findUnique({ where: { userId } }),
-    prisma.platformProviderConfig.upsert({
-      where: { id: "platform" },
-      update: {},
-      create: { id: "platform" }
-    })
+    prisma.platformProviderConfig.findUnique({ where: { id: "platform" } })
   ]);
+
+  return { userConfig, platformConfig };
+}
+
+function resolveProviderConfig(
+  provider: ProviderId,
+  snapshot: Awaited<ReturnType<typeof getProviderConfigSnapshot>>
+): ResolvedProviderConfig {
+  const fields = providerFields(provider);
+  const { userConfig, platformConfig } = snapshot;
 
   const userEncrypted = userConfig?.[fields.key];
   if (userEncrypted) {
@@ -115,7 +142,7 @@ export async function getResolvedProviderConfig(userId: string, provider: Provid
     };
   }
 
-  const platformEncrypted = platformConfig[fields.key];
+  const platformEncrypted = platformConfig?.[fields.key];
   if (platformEncrypted) {
     return {
       apiKey: decryptSecret(platformEncrypted),
@@ -138,6 +165,10 @@ export async function getResolvedProviderConfig(userId: string, provider: Provid
   return { apiKey: "", baseUrl: "", model: "", source: "none" };
 }
 
+export async function getResolvedProviderConfig(userId: string, provider: ProviderId): Promise<ResolvedProviderConfig> {
+  return resolveProviderConfig(provider, await getProviderConfigSnapshot(userId));
+}
+
 export async function getProviderApiKey(userId: string, provider: ProviderId) {
   return (await getResolvedProviderConfig(userId, provider)).apiKey;
 }
@@ -155,18 +186,22 @@ export async function isProviderConfigured(userId: string, provider: ProviderId)
 }
 
 export async function getPublicProviderConfig(userId: string): Promise<PublicProviderConfig> {
-  const userConfig = await prisma.providerConfig.findUnique({ where: { userId } });
-  const providers: ProviderId[] = ["openai", "fal"];
-  const resolvedPairs = await Promise.all(providers.map(async (provider) => [provider, await getResolvedProviderConfig(userId, provider)] as const));
+  const snapshot = await getProviderConfigSnapshot(userId);
+  const { userConfig } = snapshot;
+  const providers: ProviderId[] = ["openai"];
+  const resolvedPairs = providers.map((provider) => [provider, resolveProviderConfig(provider, snapshot)] as const);
+  const resolvedOpenAI = resolvedPairs.find(([provider]) => provider === "openai")?.[1];
 
   return {
     activeProvider: toProviderId(userConfig?.activeProvider),
     baseUrls: {
-      openai: userConfig?.openaiBaseUrl ?? resolvedPairs.find(([provider]) => provider === "openai")?.[1].baseUrl ?? ""
+      openai: userConfig?.openaiBaseUrl ?? resolvedOpenAI?.baseUrl ?? ""
     },
     models: {
-      openai: userConfig?.openaiModel ?? resolvedPairs.find(([provider]) => provider === "openai")?.[1].model ?? "",
-      fal: userConfig?.falModel ?? resolvedPairs.find(([provider]) => provider === "fal")?.[1].model ?? ""
+      openai: userConfig?.openaiModel ?? resolvedOpenAI?.model ?? ""
+    },
+    supportsCustomSize: {
+      openai: Boolean(resolvedOpenAI?.baseUrl)
     },
     keys: resolvedPairs.reduce<PublicProviderConfig["keys"]>((acc, [provider, resolved]) => {
       acc[provider] = {
@@ -175,9 +210,47 @@ export async function getPublicProviderConfig(userId: string): Promise<PublicPro
       };
       return acc;
     }, {
-      openai: { configured: false, source: "none" },
-      fal: { configured: false, source: "none" }
+      openai: { configured: false, source: "none" }
     })
+  };
+}
+
+export async function getPublicPlatformProviderConfig(): Promise<PublicPlatformProviderConfig> {
+  const platformConfig = await prisma.platformProviderConfig.findUnique({ where: { id: "platform" } });
+
+  return {
+    baseUrls: {
+      openai: platformConfig?.openaiBaseUrl ?? ""
+    },
+    models: {
+      openai: platformConfig?.openaiModel ?? ""
+    },
+    keys: {
+      openai: {
+        configured: Boolean(platformConfig?.openaiKeyEncrypted)
+      }
+    }
+  };
+}
+
+export async function getUserProviderSettings(userId: string): Promise<PublicProviderConfig> {
+  const userConfig = await prisma.providerConfig.findUnique({ where: { userId } });
+  const hasOpenAIKey = Boolean(userConfig?.openaiKeyEncrypted);
+
+  return {
+    activeProvider: toProviderId(userConfig?.activeProvider),
+    baseUrls: {
+      openai: userConfig?.openaiBaseUrl ?? ""
+    },
+    models: {
+      openai: userConfig?.openaiModel ?? ""
+    },
+    keys: {
+      openai: {
+        configured: hasOpenAIKey,
+        source: hasOpenAIKey ? "user" : "none"
+      }
+    }
   };
 }
 
@@ -188,33 +261,28 @@ export async function saveProviderConfig(userId: string, input: {
   models?: Partial<Record<ProviderId, string>>;
 }) {
   const current = await prisma.providerConfig.findUnique({ where: { userId } });
-  const data = {
+  const data: {
+    activeProvider?: string | null;
+    openaiKeyEncrypted?: string;
+    openaiBaseUrl?: string | null;
+    openaiModel?: string | null;
+  } = {
     activeProvider: input.activeProvider ?? current?.activeProvider ?? undefined,
     openaiKeyEncrypted: current?.openaiKeyEncrypted ?? undefined,
-    falKeyEncrypted: current?.falKeyEncrypted ?? undefined,
     openaiBaseUrl: current?.openaiBaseUrl ?? undefined,
-    openaiModel: current?.openaiModel ?? undefined,
-    falModel: current?.falModel ?? undefined
+    openaiModel: current?.openaiModel ?? undefined
   };
 
   if (typeof input.keys?.openai === "string" && input.keys.openai.trim()) {
     data.openaiKeyEncrypted = encryptSecret(input.keys.openai.trim());
   }
 
-  if (typeof input.keys?.fal === "string" && input.keys.fal.trim()) {
-    data.falKeyEncrypted = encryptSecret(input.keys.fal.trim());
-  }
-
   if (typeof input.baseUrls?.openai === "string") {
-    data.openaiBaseUrl = input.baseUrls.openai.trim().replace(/\/+$/, "") || undefined;
+    data.openaiBaseUrl = input.baseUrls.openai.trim().replace(/\/+$/, "") || null;
   }
 
   if (typeof input.models?.openai === "string") {
-    data.openaiModel = input.models.openai.trim() || undefined;
-  }
-
-  if (typeof input.models?.fal === "string") {
-    data.falModel = input.models.fal.trim() || undefined;
+    data.openaiModel = input.models.openai.trim() || null;
   }
 
   await prisma.providerConfig.upsert({
@@ -223,7 +291,7 @@ export async function saveProviderConfig(userId: string, input: {
     update: data
   });
 
-  return getPublicProviderConfig(userId);
+  return getUserProviderSettings(userId);
 }
 
 export async function savePlatformProviderConfig(input: {
@@ -231,41 +299,32 @@ export async function savePlatformProviderConfig(input: {
   baseUrls?: Partial<Record<ProviderId, string>>;
   models?: Partial<Record<ProviderId, string>>;
 }) {
-  const current = await prisma.platformProviderConfig.upsert({
-    where: { id: "platform" },
-    update: {},
-    create: { id: "platform" }
-  });
-  const data = {
-    openaiKeyEncrypted: current.openaiKeyEncrypted ?? undefined,
-    falKeyEncrypted: current.falKeyEncrypted ?? undefined,
-    openaiBaseUrl: current.openaiBaseUrl ?? undefined,
-    openaiModel: current.openaiModel ?? undefined,
-    falModel: current.falModel ?? undefined
+  const current = await prisma.platformProviderConfig.findUnique({ where: { id: "platform" } });
+  const data: {
+    openaiKeyEncrypted?: string;
+    openaiBaseUrl?: string | null;
+    openaiModel?: string | null;
+  } = {
+    openaiKeyEncrypted: current?.openaiKeyEncrypted ?? undefined,
+    openaiBaseUrl: current?.openaiBaseUrl ?? undefined,
+    openaiModel: current?.openaiModel ?? undefined
   };
 
   if (typeof input.keys?.openai === "string" && input.keys.openai.trim()) {
     data.openaiKeyEncrypted = encryptSecret(input.keys.openai.trim());
   }
 
-  if (typeof input.keys?.fal === "string" && input.keys.fal.trim()) {
-    data.falKeyEncrypted = encryptSecret(input.keys.fal.trim());
-  }
-
   if (typeof input.baseUrls?.openai === "string") {
-    data.openaiBaseUrl = input.baseUrls.openai.trim().replace(/\/+$/, "") || undefined;
+    data.openaiBaseUrl = input.baseUrls.openai.trim().replace(/\/+$/, "") || null;
   }
 
   if (typeof input.models?.openai === "string") {
-    data.openaiModel = input.models.openai.trim() || undefined;
+    data.openaiModel = input.models.openai.trim() || null;
   }
 
-  if (typeof input.models?.fal === "string") {
-    data.falModel = input.models.fal.trim() || undefined;
-  }
-
-  return prisma.platformProviderConfig.update({
+  return prisma.platformProviderConfig.upsert({
     where: { id: "platform" },
-    data
+    create: { id: "platform", ...data },
+    update: data
   });
 }

@@ -1,6 +1,16 @@
 import OpenAI from "openai";
 import type { ImageProvider, InputImage, ProviderRequest, ProviderResult } from "../provider-types";
 
+type OpenAIImageResponse = {
+  data?: Array<{
+    b64_json?: string | null;
+    revised_prompt?: string | null;
+    url?: string | null;
+  }>;
+};
+
+type ImagePayload = Record<string, unknown>;
+
 function getClient(request: ProviderRequest) {
   const apiKey = request.credentials.apiKey;
   if (!apiKey) {
@@ -19,33 +29,82 @@ function inputImageToFile(image: InputImage) {
   return new File([blob], image.filename, { type: image.mimeType });
 }
 
-function getB64Image(response: { data?: Array<{ b64_json?: string | null }> }) {
-  const b64 = response.data?.[0]?.b64_json;
+function compactPayload(payload: ImagePayload) {
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && value !== null && value !== ""));
+}
 
-  if (!b64) {
-    throw new Error("OpenAI did not return image data.");
+function isOpenAICompatibleGateway(request: ProviderRequest) {
+  return Boolean(request.credentials.baseUrl);
+}
+
+function getCommonPayload(request: ProviderRequest) {
+  const payload: ImagePayload = {
+    model: request.model.modelId,
+    prompt: request.prompt,
+    size: request.size,
+    quality: request.quality
+  };
+
+  if (!isOpenAICompatibleGateway(request)) {
+    payload.output_format = "png";
   }
 
-  return Buffer.from(b64, "base64");
+  return compactPayload(payload);
+}
+
+function parseDataUrl(value: string) {
+  const match = /^data:([^;,]+)?;base64,(.+)$/i.exec(value);
+  if (!match) return null;
+
+  return {
+    imageBuffer: Buffer.from(match[2], "base64"),
+    mimeType: match[1] || "image/png"
+  };
+}
+
+async function fetchImageUrl(url: string): Promise<ProviderResult> {
+  const dataUrl = parseDataUrl(url);
+  if (dataUrl) return dataUrl;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`OpenAI image URL download failed: ${response.status} ${response.statusText}`.trim());
+  }
+
+  const imageBuffer = Buffer.from(await response.arrayBuffer());
+  const mimeType = response.headers.get("content-type")?.split(";")[0]?.trim() || "image/png";
+
+  return { imageBuffer, mimeType };
+}
+
+async function getImageResult(response: OpenAIImageResponse): Promise<ProviderResult> {
+  const firstImage = response.data?.[0];
+  const b64 = firstImage?.b64_json;
+  if (b64) {
+    return {
+      imageBuffer: Buffer.from(b64, "base64"),
+      mimeType: "image/png"
+    };
+  }
+
+  if (firstImage?.url) {
+    return fetchImageUrl(firstImage.url);
+  }
+
+  throw new Error("OpenAI did not return image data.");
 }
 
 export const openaiProvider: ImageProvider = {
   async createImage(request: ProviderRequest): Promise<ProviderResult> {
     const client = getClient(request);
-    const common = {
-      model: request.model.modelId,
-      prompt: request.prompt,
-      size: request.size,
-      quality: request.quality,
-      output_format: "png"
-    };
+    const common = getCommonPayload(request);
 
     if (request.mode === "text-to-image") {
-      const response = await client.images.generate(common as never);
+      const response = await client.images.generate(common as never) as OpenAIImageResponse;
+      const result = await getImageResult(response);
 
       return {
-        imageBuffer: getB64Image(response),
-        mimeType: "image/png",
+        ...result,
         providerMeta: {
           revisedPrompt: response.data?.[0]?.revised_prompt ?? null
         }
@@ -57,15 +116,18 @@ export const openaiProvider: ImageProvider = {
     }
 
     const files = request.inputImages.map(inputImageToFile);
-    const response = await client.images.edit({
+    const editPayload = compactPayload({
       ...common,
       image: files.length === 1 ? files[0] : files,
-      input_fidelity: request.inputFidelity
-    } as never);
+      input_fidelity: isOpenAICompatibleGateway(request) ? undefined : request.inputFidelity
+    });
+    const response = await client.images.edit({
+      ...editPayload
+    } as never) as OpenAIImageResponse;
+    const result = await getImageResult(response);
 
     return {
-      imageBuffer: getB64Image(response),
-      mimeType: "image/png",
+      ...result,
       providerMeta: {
         revisedPrompt: response.data?.[0]?.revised_prompt ?? null
       }

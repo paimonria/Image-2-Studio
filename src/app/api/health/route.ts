@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
+import { getImageJobQueueSnapshot } from "@/lib/server/image-jobs";
+import { getAppVersion } from "@/lib/version";
 
 export const runtime = "nodejs";
 
 export async function GET() {
+  const jobQueue = await getImageJobQueueSnapshot();
+
   return NextResponse.json({
     status: "ok",
     service: "image-2-studio",
-    version: process.env.npm_package_version ?? "0.1.0",
-    timestamp: new Date().toISOString()
+    version: getAppVersion(),
+    timestamp: new Date().toISOString(),
+    jobQueue
   });
 }

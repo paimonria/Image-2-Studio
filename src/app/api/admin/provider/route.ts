@@ -16,15 +16,13 @@ export async function POST(request: Request) {
 
     await savePlatformProviderConfig({
       keys: {
-        openai: typeof body.keys?.openai === "string" ? body.keys.openai : undefined,
-        fal: typeof body.keys?.fal === "string" ? body.keys.fal : undefined
+        openai: typeof body.keys?.openai === "string" ? body.keys.openai : undefined
       },
       baseUrls: {
         openai: typeof body.baseUrls?.openai === "string" ? body.baseUrls.openai : undefined
       },
       models: {
-        openai: typeof body.models?.openai === "string" ? body.models.openai : undefined,
-        fal: typeof body.models?.fal === "string" ? body.models.fal : undefined
+        openai: typeof body.models?.openai === "string" ? body.models.openai : undefined
       }
     });
 

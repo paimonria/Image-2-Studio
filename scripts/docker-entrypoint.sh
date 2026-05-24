@@ -40,6 +40,44 @@ if ! su-exec nextjs:nodejs sh -c 'touch /app/storage/.write-test && rm /app/stor
   exit 1
 fi
 
-su-exec nextjs:nodejs ./node_modules/.bin/prisma migrate deploy --schema prisma/schema.active.prisma
+if [ "${DB_MIGRATE_ON_START:-true}" != "false" ] && [ "${DB_MIGRATE_ON_START:-true}" != "0" ]; then
+  attempts="${DB_MIGRATE_ATTEMPTS:-12}"
+  delay="${DB_MIGRATE_RETRY_SECONDS:-5}"
+  current=1
 
-exec su-exec nextjs:nodejs ./node_modules/.bin/next start
+  echo "Running database migrations before startup..."
+  while true; do
+    if su-exec nextjs:nodejs node /opt/runtime-node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.active.prisma; then
+      echo "Database migrations completed."
+      break
+    fi
+
+    if [ "$current" -ge "$attempts" ]; then
+      echo "Startup failed: database migrations did not complete after ${attempts} attempts." >&2
+      exit 1
+    fi
+
+    echo "Database migration attempt ${current}/${attempts} failed; retrying in ${delay}s..." >&2
+    current=$((current + 1))
+    sleep "$delay"
+  done
+else
+  echo "Skipping database migrations because DB_MIGRATE_ON_START=${DB_MIGRATE_ON_START}."
+fi
+
+case "${IMAGE_PROCESS_ROLE:-web}" in
+  worker)
+    if [ -z "$REDIS_URL" ]; then
+      echo "Startup failed: REDIS_URL must be set when IMAGE_PROCESS_ROLE=worker." >&2
+      exit 1
+    fi
+    exec su-exec nextjs:nodejs node dist-worker/worker/image-worker.js
+    ;;
+  web)
+    exec su-exec nextjs:nodejs node server.js
+    ;;
+  *)
+    echo "Startup failed: IMAGE_PROCESS_ROLE must be web or worker." >&2
+    exit 1
+    ;;
+esac

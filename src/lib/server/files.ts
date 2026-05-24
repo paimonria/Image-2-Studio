@@ -14,6 +14,8 @@ export type StoredFile = {
   buffer: Buffer;
 };
 
+export type StoredFileMeta = Omit<StoredFile, "buffer">;
+
 const ALLOWED_UPLOAD_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -89,6 +91,16 @@ export async function saveUploadedFile(userId: string, file: File): Promise<Stor
 }
 
 export async function readStoredImageForUser(userId: string, imageId: string) {
+  const image = await readStoredImageMetaForUser(userId, imageId);
+  const buffer = await fs.readFile(image.filePath);
+
+  return {
+    ...image,
+    buffer
+  };
+}
+
+export async function readStoredImageMetaForUser(userId: string, imageId: string): Promise<StoredFileMeta> {
   const record = await prisma.storedImage.findFirst({
     where: {
       id: imageId,
@@ -108,24 +120,20 @@ export async function readStoredImageForUser(userId: string, imageId: string) {
       throw new AppError("Image not found.", 404);
     }
 
-    const buffer = await fs.readFile(historyRecord.filePath);
     return {
       id: historyRecord.id,
       filename: path.basename(historyRecord.filePath),
       filePath: historyRecord.filePath,
       imageUrl: `/api/images/file/${historyRecord.id}`,
-      mimeType: historyRecord.mimeType || extensionToMime(historyRecord.filePath),
-      buffer
+      mimeType: historyRecord.mimeType || extensionToMime(historyRecord.filePath)
     };
   }
 
-  const buffer = await fs.readFile(record.filePath);
   return {
     id: record.id,
     filename: record.filename,
     filePath: record.filePath,
     imageUrl: `/api/images/file/${record.id}`,
-    mimeType: record.mimeType || extensionToMime(record.filePath),
-    buffer
+    mimeType: record.mimeType || extensionToMime(record.filePath)
   };
 }

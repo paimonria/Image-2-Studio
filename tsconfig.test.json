@@ -1,0 +1,35 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": false,
+    "declaration": false,
+    "incremental": false,
+    "isolatedModules": false,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "noEmit": false,
+    "outDir": ".test-dist",
+    "rootDir": ".",
+    "target": "ES2022",
+    "types": ["node"]
+  },
+  "include": [
+    "src/lib/batch-start.ts",
+    "src/lib/batch-timeout.ts",
+    "src/lib/history-records.ts",
+    "src/lib/image-job-scheduling.ts",
+    "src/lib/image-job-runner.ts",
+    "src/lib/image-job-state.ts",
+    "src/lib/image-worker-startup.ts",
+    "src/lib/job-monitor.ts",
+    "src/lib/server/errors.ts",
+    "src/lib/server/responses.ts",
+    "src/lib/types.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+    ".test-dist"
+  ]
+}

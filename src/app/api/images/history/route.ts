@@ -1,15 +1,35 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
-import { readHistory } from "@/lib/server/history";
+import { deleteHistoryRecords, normalizeHistoryLimit, readHistoryPage } from "@/lib/server/history";
 import { handleRouteError } from "@/lib/server/responses";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await requireUser();
-    const records = await readHistory(user.id);
-    return NextResponse.json({ records });
+    const url = new URL(request.url);
+    const page = await readHistoryPage(user.id, {
+      limit: normalizeHistoryLimit(url.searchParams.get("limit")),
+      cursor: url.searchParams.get("cursor"),
+      batchId: url.searchParams.get("batchId"),
+      projectId: url.searchParams.get("projectId"),
+      tag: url.searchParams.get("tag")
+    });
+
+    return NextResponse.json(page);
+  } catch (error) {
+    return handleRouteError(error);
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const user = await requireUser();
+    const body = (await request.json().catch(() => ({}))) as { ids?: unknown };
+    const deletedIds = await deleteHistoryRecords(user.id, body.ids);
+
+    return NextResponse.json({ ok: true, deletedIds });
   } catch (error) {
     return handleRouteError(error);
   }

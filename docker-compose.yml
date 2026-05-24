@@ -20,6 +20,25 @@ services:
         max-size: 10m
         max-file: "3"
 
+  redis:
+    # Bundled Redis for the default local and server-side stack.
+    image: redis:7-alpine
+    container_name: image-2-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--loglevel", "warning"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
   image-2-studio:
     image: ${IMAGE_NAME:-ghcr.io/pairmeng/image-2-studio}:${IMAGE_TAG:-latest}
     pull_policy: always
@@ -30,6 +49,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "${APP_PORT:-3000}:3000"
     env_file:
@@ -38,7 +59,15 @@ services:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
-      DATABASE_URL: postgresql://image2:${POSTGRES_PASSWORD:-change-me}@postgres:5432/image2?schema=public
+      DB_MIGRATE_ON_START: ${DB_MIGRATE_ON_START:-true}
+      DB_MIGRATE_ATTEMPTS: ${DB_MIGRATE_ATTEMPTS:-12}
+      DB_MIGRATE_RETRY_SECONDS: ${DB_MIGRATE_RETRY_SECONDS:-5}
+      IMAGE_PROCESS_ROLE: web
+      # Leave REDIS_URL blank to use the bundled Redis service.
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      IMAGE_QUEUE_PREFIX: ${IMAGE_QUEUE_PREFIX:-image2}
+      # Set DOCKER_DATABASE_URL in .env to use an external PostgreSQL database.
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://image2:${POSTGRES_PASSWORD:-change-me}@postgres:5432/image2?schema=public&connection_limit=${DATABASE_CONNECTION_LIMIT:-10}}
     volumes:
       - ./storage:/app/storage
     healthcheck:
@@ -53,5 +82,39 @@ services:
         max-size: 10m
         max-file: "3"
 
+  image-2-worker:
+    image: ${IMAGE_NAME:-ghcr.io/pairmeng/image-2-studio}:${IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      IMAGE_PROCESS_ROLE: worker
+      DB_MIGRATE_ON_START: "false"
+      # Leave REDIS_URL blank to use the bundled Redis service.
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      IMAGE_QUEUE_PREFIX: ${IMAGE_QUEUE_PREFIX:-image2}
+      IMAGE_WORKER_CONCURRENCY: ${IMAGE_WORKER_CONCURRENCY:-8}
+      IMAGE_QUEUE_ATTEMPTS: ${IMAGE_QUEUE_ATTEMPTS:-3}
+      IMAGE_QUEUE_BACKOFF_MS: ${IMAGE_QUEUE_BACKOFF_MS:-5000}
+      # Set DOCKER_DATABASE_URL in .env to use an external PostgreSQL database.
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://image2:${POSTGRES_PASSWORD:-change-me}@postgres:5432/image2?schema=public&connection_limit=${WORKER_DATABASE_CONNECTION_LIMIT:-10}}
+    volumes:
+      - ./storage:/app/storage
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
 volumes:
   postgres-data:
+  redis-data:

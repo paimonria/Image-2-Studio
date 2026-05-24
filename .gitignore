@@ -1,8 +1,11 @@
 .next/
+.test-dist/
 node_modules/
 .pnpm-store/
 .codex/
+PROJECT_BRIEF.md
 dist/
+*.tsbuildinfo
 .env
 .env*.local
 storage/

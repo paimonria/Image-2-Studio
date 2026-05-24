@@ -1,4 +1,4 @@
-export type ProviderId = "openai" | "fal";
+export type ProviderId = "openai";
 
 export type ImageMode = "text-to-image" | "image-to-image";
 
@@ -17,17 +17,19 @@ export type ModelDefinition = {
   defaultQuality?: string;
   qualityOptions?: string[];
   inputFidelityOptions?: string[];
+  supportsCustomSize?: boolean;
 };
 
 export type ProviderStatus = {
   provider: ProviderId;
   label: string;
   configured: boolean;
+  supportsCustomSize?: boolean;
+  baseUrlConfigured?: boolean;
 };
 
-export const PROVIDERS: Array<Omit<ProviderStatus, "configured">> = [
-  { provider: "openai", label: "OpenAI" },
-  { provider: "fal", label: "fal" }
+export const PROVIDERS: Array<Omit<ProviderStatus, "configured" | "supportsCustomSize" | "baseUrlConfigured">> = [
+  { provider: "openai", label: "OpenAI" }
 ];
 
 export const COMMON_ASPECT_RATIOS = ["auto", "1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "1:2", "2:1"];
@@ -45,18 +47,8 @@ export const MODEL_CATALOG: ModelDefinition[] = [
     supportedAspectRatios: COMMON_ASPECT_RATIOS,
     defaultQuality: "medium",
     qualityOptions: ["low", "medium", "high"],
-    inputFidelityOptions: ["high", "low"]
-  },
-  {
-    provider: "fal",
-    modelId: "fal-ai/flux/dev",
-    label: "FLUX.1 dev",
-    description: "fal-hosted FLUX text-to-image model. Image edit is reserved for later models.",
-    capabilities: ["text-to-image"],
-    defaultAspectRatio: "3:4",
-    supportedAspectRatios: COMMON_ASPECT_RATIOS,
-    defaultQuality: "standard",
-    qualityOptions: ["standard"]
+    inputFidelityOptions: ["high", "low"],
+    supportsCustomSize: false
   }
 ];
 
@@ -81,30 +73,17 @@ export function createOpenAICompatibleModel(modelId: string): ModelDefinition {
     supportedAspectRatios: COMMON_ASPECT_RATIOS,
     defaultQuality: "medium",
     qualityOptions: ["low", "medium", "high"],
-    inputFidelityOptions: ["high", "low"]
+    inputFidelityOptions: ["high", "low"],
+    supportsCustomSize: true
   };
 }
 
-export function createFalTextModel(modelId: string): ModelDefinition {
-  return {
-    provider: "fal",
-    modelId,
-    label: modelId,
-    description: "fal text-to-image model from custom provider settings.",
-    capabilities: ["text-to-image"],
-    defaultAspectRatio: "3:4",
-    supportedAspectRatios: COMMON_ASPECT_RATIOS,
-    defaultQuality: "standard",
-    qualityOptions: ["standard"]
-  };
-}
-
-export function modelSupports(model: ModelDefinition, capability: ImageCapability) {
-  return model.capabilities.includes(capability);
+export function modelSupports(model: ModelDefinition | undefined, capability: ImageCapability) {
+  return Boolean(model?.capabilities.includes(capability));
 }
 
 export function isProviderId(value: string | null): value is ProviderId {
-  return value === "openai" || value === "fal";
+  return value === "openai";
 }
 
 export function isImageMode(value: string | null): value is ImageMode {

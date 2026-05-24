@@ -1,0 +1,238 @@
+import { useEffect, useMemo, useState } from "react";
+import type { CatalogResponse } from "@/lib/types";
+import type { ProviderId } from "@/lib/models";
+
+export type Branding = {
+  siteTitle: string;
+  faviconUrl: string;
+  logoUrl: string;
+};
+
+type ProviderSettingsResponse = {
+  activeProvider?: ProviderId;
+  keys: Record<ProviderId, { configured: boolean; source: "user" | "platform" | "env" | "none" }>;
+  baseUrls: Partial<Record<ProviderId, string>>;
+  models: Partial<Record<ProviderId, string>>;
+};
+
+type CatalogDefaultSelection = {
+  provider: ProviderId;
+  modelId?: string;
+  defaultAspectRatio: string;
+  defaultResolution: string;
+  defaultQuality: string;
+  defaultInputFidelity: string;
+};
+
+type UseStudioCatalogOptions = {
+  provider: ProviderId;
+  defaultSiteTitle: string;
+  defaultResolution: string;
+  officialOpenAIResolution: string;
+  messages: {
+    catalogLoadFailed: string;
+    settingsLoadFailed: string;
+    settingsSaveFailed: string;
+    keySaved: string;
+  };
+  onUnauthorized: (response: Response) => boolean;
+  onActiveProviderChange: (provider: ProviderId) => void;
+  onCatalogDefaultSelection: (selection: CatalogDefaultSelection) => void;
+};
+
+export function useStudioCatalog({
+  provider,
+  defaultSiteTitle,
+  defaultResolution,
+  officialOpenAIResolution,
+  messages,
+  onUnauthorized,
+  onActiveProviderChange,
+  onCatalogDefaultSelection
+}: UseStudioCatalogOptions) {
+  const [branding, setBranding] = useState<Branding>({ siteTitle: defaultSiteTitle, faviconUrl: "", logoUrl: "" });
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+  const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [openaiBaseUrl, setOpenaiBaseUrl] = useState("");
+  const [openaiModel, setOpenaiModel] = useState("");
+  const [userOpenaiKeyConfigured, setUserOpenaiKeyConfigured] = useState(false);
+  const [providerSettingsLoaded, setProviderSettingsLoaded] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState("");
+
+  const brandLogoUrl = useMemo(
+    () => logoLoadFailed ? "" : branding.logoUrl.trim(),
+    [branding.logoUrl, logoLoadFailed]
+  );
+
+  function resetCatalogState() {
+    setCatalog(null);
+    resetProviderSettingsState();
+  }
+
+  function resetProviderSettingsState() {
+    setSettingsMessage("");
+    setProviderSettingsLoaded(false);
+    setUserOpenaiKeyConfigured(false);
+    setOpenaiKey("");
+  }
+
+  async function loadBranding() {
+    const response = await fetch("/api/app/branding", { cache: "no-store" });
+    if (!response.ok) return;
+
+    const body = (await response.json().catch(() => ({}))) as Partial<Branding>;
+    setBranding({
+      siteTitle: typeof body.siteTitle === "string" && body.siteTitle.trim() ? body.siteTitle.trim() : defaultSiteTitle,
+      faviconUrl: typeof body.faviconUrl === "string" ? body.faviconUrl.trim() : "",
+      logoUrl: typeof body.logoUrl === "string" ? body.logoUrl.trim() : ""
+    });
+  }
+
+  async function loadCatalog() {
+    const response = await fetch("/api/images/catalog", { cache: "no-store" });
+    if (onUnauthorized(response)) return;
+    if (!response.ok) throw new Error(messages.catalogLoadFailed);
+
+    const body = (await response.json()) as CatalogResponse;
+    if (!Array.isArray(body.providers) || !Array.isArray(body.models)) {
+      throw new Error(messages.catalogLoadFailed);
+    }
+
+    setCatalog(body);
+
+    const preferred = body.providers.find((item) => item.provider === "openai" && item.configured)
+      ?? body.providers.find((item) => item.configured)
+      ?? body.providers[0];
+    if (!preferred) return;
+
+    const preferredModel = body.models.find((item) => item.provider === preferred.provider);
+
+    onCatalogDefaultSelection({
+      provider: preferred.provider,
+      modelId: preferredModel?.modelId,
+      defaultAspectRatio: preferredModel?.defaultAspectRatio ?? "3:4",
+      defaultResolution: preferred.supportsCustomSize ? defaultResolution : officialOpenAIResolution,
+      defaultQuality: preferredModel?.defaultQuality ?? "medium",
+      defaultInputFidelity: preferredModel?.inputFidelityOptions?.[0] ?? "high"
+    });
+  }
+
+  async function loadProviderSettings() {
+    const response = await fetch("/api/settings/provider", { cache: "no-store" });
+    if (onUnauthorized(response)) return;
+    if (!response.ok) throw new Error(messages.settingsLoadFailed);
+
+    const body = (await response.json()) as ProviderSettingsResponse;
+
+    if (body.activeProvider) {
+      onActiveProviderChange(body.activeProvider);
+    }
+
+    setOpenaiBaseUrl(body.baseUrls?.openai ?? "");
+    setOpenaiModel(body.models?.openai ?? "");
+    setUserOpenaiKeyConfigured(Boolean(body.keys?.openai?.configured && body.keys.openai.source === "user"));
+    setProviderSettingsLoaded(true);
+  }
+
+  async function saveProviderSettings() {
+    setSavingSettings(true);
+    setSettingsMessage("");
+
+    try {
+      const response = await fetch("/api/settings/provider", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          activeProvider: provider,
+          keys: {
+            openai: openaiKey
+          },
+          baseUrls: {
+            openai: openaiBaseUrl
+          },
+          models: {
+            openai: openaiModel
+          }
+        })
+      });
+
+      if (onUnauthorized(response)) return;
+
+      if (!response.ok) {
+        throw new Error(messages.settingsSaveFailed);
+      }
+
+      setOpenaiKey("");
+      setUserOpenaiKeyConfigured(Boolean(openaiKey.trim()) || userOpenaiKeyConfigured);
+      setProviderSettingsLoaded(true);
+      setSettingsMessage(messages.keySaved);
+      await loadCatalog();
+    } catch (caught) {
+      setSettingsMessage(caught instanceof Error ? caught.message : messages.settingsSaveFailed);
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadBranding();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Branding is bootstrapped once; manual refresh uses loadBranding directly.
+  }, []);
+
+  useEffect(() => {
+    document.title = branding.siteTitle || defaultSiteTitle;
+
+    const managedId = "app-favicon";
+    const existing = document.querySelector<HTMLLinkElement>(`link#${managedId}`);
+
+    if (!branding.faviconUrl) {
+      existing?.remove();
+      return;
+    }
+
+    const link = existing ?? document.createElement("link");
+    link.id = managedId;
+    link.rel = "icon";
+    link.href = branding.faviconUrl;
+
+    if (!existing) {
+      document.head.appendChild(link);
+    }
+  }, [branding, defaultSiteTitle]);
+
+  useEffect(() => {
+    setLogoLoadFailed(false);
+  }, [branding.logoUrl]);
+
+  return {
+    branding,
+    brandLogoUrl,
+    logoLoadFailed,
+    setLogoLoadFailed,
+    catalog,
+    setCatalog,
+    openaiKey,
+    setOpenaiKey,
+    openaiBaseUrl,
+    setOpenaiBaseUrl,
+    openaiModel,
+    setOpenaiModel,
+    userOpenaiKeyConfigured,
+    providerSettingsLoaded,
+    savingSettings,
+    settingsMessage,
+    setSettingsMessage,
+    setProviderSettingsLoaded,
+    setUserOpenaiKeyConfigured,
+    resetCatalogState,
+    resetProviderSettingsState,
+    loadBranding,
+    loadCatalog,
+    loadProviderSettings,
+    saveProviderSettings
+  };
+}

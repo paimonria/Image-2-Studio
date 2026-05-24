@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { createSession, hashPassword, normalizeEmail, toPublicUser } from "@/lib/server/auth";
 import { prisma } from "@/lib/server/db";
-import { getAppSettings } from "@/lib/server/provider-config";
+import { readAppSettings } from "@/lib/server/provider-config";
 import { jsonError } from "@/lib/server/responses";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const settings = await getAppSettings();
+  const settings = await readAppSettings();
   if (!settings.registrationOpen) {
     return jsonError("Registration is closed.", 403);
   }

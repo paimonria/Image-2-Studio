@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireAdmin, toPublicUser } from "@/lib/server/auth";
 import { prisma } from "@/lib/server/db";
-import { getAppSettings } from "@/lib/server/provider-config";
+import { getImageJobQueueSnapshot } from "@/lib/server/image-jobs";
+import { getPublicPlatformProviderConfig, readAppSettings } from "@/lib/server/provider-config";
 import { handleRouteError } from "@/lib/server/responses";
 
 export const runtime = "nodejs";
@@ -9,23 +10,27 @@ export const runtime = "nodejs";
 export async function GET() {
   try {
     await requireAdmin();
-    const [settings, users, images, usage] = await Promise.all([
-      getAppSettings(),
+    const [settings, users, images, usage, jobQueue, platformProvider] = await Promise.all([
+      readAppSettings(),
       prisma.user.findMany({ orderBy: { createdAt: "desc" } }),
       prisma.imageRecord.findMany({
         orderBy: { createdAt: "desc" },
-        take: 50,
+        take: 12,
         include: { user: { select: { email: true } } }
       }),
       prisma.usageDaily.findMany({
         orderBy: { updatedAt: "desc" },
-        take: 100,
+        take: 12,
         include: { user: { select: { email: true } } }
-      })
+      }),
+      getImageJobQueueSnapshot(),
+      getPublicPlatformProviderConfig()
     ]);
 
     return NextResponse.json({
       settings,
+      platformProvider,
+      jobQueue,
       users: users.map(toPublicUser),
       images: images.map((image) => ({
         id: image.id,

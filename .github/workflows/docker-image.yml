@@ -41,11 +41,14 @@ jobs:
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF}" == refs/tags/v* ]]; then
             tags="${IMAGE_NAME}:${GITHUB_REF_NAME},${IMAGE_NAME}:latest"
+            version="${GITHUB_REF_NAME}"
           else
             tags="${IMAGE_NAME}:pr-${{ github.event.pull_request.number }}"
+            version="pr-${{ github.event.pull_request.number }}"
           fi
 
           echo "tags=${tags}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
       - name: Build and optionally push Docker image
         uses: docker/build-push-action@v7
@@ -58,5 +61,6 @@ jobs:
           build-args: |
             NPM_REGISTRY=${{ env.NPM_REGISTRY }}
             PNPM_VERSION=${{ env.PNPM_VERSION }}
+            APP_VERSION=${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
