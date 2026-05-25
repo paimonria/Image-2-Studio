@@ -3,6 +3,7 @@
 node_modules/
 .pnpm-store/
 .codex/
+.vscode/
 PROJECT_BRIEF.md
 DEVELOPMENT.local.md
 DEVELOPMENT.local.html
