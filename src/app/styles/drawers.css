@@ -1,0 +1,151 @@
+﻿.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  border: 0;
+  background: rgba(23, 32, 51, 0.28);
+  backdrop-filter: blur(6px) saturate(1.08);
+  animation: scrimIn 260ms var(--ease-out) both;
+}
+
+.settings-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 31;
+  width: min(410px, calc(100vw - 24px));
+  height: 100vh;
+  padding: 20px;
+  border-left: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: -22px 0 70px rgba(65, 82, 124, 0.22);
+  transform: translateX(104%);
+  transition: transform 420ms var(--ease-out), box-shadow 420ms var(--ease-out);
+  overflow: auto;
+  will-change: transform;
+  backdrop-filter: var(--glass-blur);
+}
+
+.settings-drawer.is-open {
+  transform: translateX(0);
+}
+
+.drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.drawer-head h2 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.drawer-section {
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+
+.key-field {
+  display: grid;
+  gap: 8px;
+  color: var(--muted-strong);
+  font-size: 13px;
+}
+
+.key-field .field {
+  min-height: 44px;
+}
+
+.drawer-save {
+  width: 100%;
+}
+
+.drawer-save-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 2px;
+  padding: 16px 0 18px;
+}
+
+.drawer-save-section .settings-message {
+  padding: 10px 12px;
+  border: 1px solid rgba(8, 119, 94, 0.16);
+  border-radius: 8px;
+  background: rgba(8, 119, 94, 0.06);
+}
+
+.settings-message {
+  margin: 0;
+  color: #08775e;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.settings-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.filter-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.field-label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.toggle-row {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.toggle-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.drop-zone p,
+.hint,
+.settings-note,
+.section-row span {
+  color: #898b97;
+}
+
+.drawer-section {
+  border-top-color: rgba(255, 255, 255, 0.09);
+}
+
+.settings-message {
+  color: #8ef0c7;
+}
+
+.section-label,
+.section-row span,
+.hint,
+.prompt-tools,
+.drop-zone p,
+.settings-note {
+  color: var(--muted);
+}
+
+.drawer-section {
+  border-top-color: rgba(80, 100, 135, 0.12);
+}
+

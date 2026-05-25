@@ -1,0 +1,495 @@
+﻿:root {
+  --bg: #f5f7fb;
+  --panel: rgba(255, 255, 255, 0.68);
+  --panel-strong: #ffffff;
+  --field: rgba(255, 255, 255, 0.58);
+  --line: rgba(178, 190, 213, 0.58);
+  --line-strong: rgba(147, 162, 190, 0.58);
+  --text: #172033;
+  --muted: #68758d;
+  --muted-strong: #39465c;
+  --accent: #5570f1;
+  --accent-strong: #3449c7;
+  --accent-soft: rgba(85, 112, 241, 0.1);
+  --green: #009c76;
+  --green-soft: rgba(0, 156, 118, 0.12);
+  --gold: #d68b00;
+  --hot: #dc3f3f;
+  --pink: #e95fb2;
+  --sky: #2c9bd8;
+  --glass-edge: rgba(255, 255, 255, 0.74);
+  --glass-edge-soft: rgba(255, 255, 255, 0.42);
+  --glass-tint: rgba(248, 251, 255, 0.5);
+  --shadow: 0 22px 58px rgba(65, 82, 124, 0.12);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --glass-blur: blur(26px) saturate(1.08);
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 12% 18%, rgba(133, 179, 228, 0.16), transparent 30%),
+    radial-gradient(circle at 86% 16%, rgba(206, 216, 235, 0.42), transparent 27%),
+    radial-gradient(circle at 70% 84%, rgba(183, 220, 210, 0.12), transparent 34%),
+    linear-gradient(180deg, #fbfdff 0%, var(--bg) 48%, #eef3f9 100%);
+  font-family:
+    "Aptos",
+    "Segoe UI",
+    "Helvetica Neue",
+    sans-serif;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(85, 112, 241, 0.038) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(85, 112, 241, 0.038) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.7), transparent 82%);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+a {
+  color: inherit;
+}
+
+img {
+  max-width: 100%;
+}
+
+::selection {
+  color: #fff;
+  background: rgba(85, 112, 241, 0.82);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes brandFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes workspaceIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.992);
+    filter: blur(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes selectionPanelIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px) scale(0.985);
+    filter: blur(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+    filter: blur(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes liquidMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.985);
+    filter: blur(8px) saturate(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0) saturate(1);
+  }
+}
+
+@keyframes lightboxIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.975);
+    filter: blur(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes resultIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+    filter: blur(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes pendingBreath {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.78),
+      0 0 0 rgba(85, 112, 241, 0);
+    transform: translateY(0);
+  }
+
+  50% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.78),
+      0 18px 48px rgba(85, 112, 241, 0.12);
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes generateGlow {
+  0%,
+  100% {
+    filter: saturate(1);
+  }
+
+  50% {
+    filter: saturate(1.18) brightness(1.04);
+  }
+}
+
+@keyframes tilePulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.44;
+  }
+
+  50% {
+    transform: scale(0.985);
+    opacity: 0.86;
+  }
+}
+
+@keyframes selectedPop {
+  from {
+    transform: scale(0.96);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes statusEnter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes statusSheen {
+  0% {
+    transform: translateX(-130%);
+  }
+
+  58%,
+  100% {
+    transform: translateX(130%);
+  }
+}
+
+@keyframes previewSheen {
+  0% {
+    transform: translateX(-135%);
+  }
+
+  55%,
+  100% {
+    transform: translateX(135%);
+  }
+}
+
+@keyframes tileSheen {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  60%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes floatCard {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes imageReveal {
+  from {
+    opacity: 0;
+    transform: scale(0.992);
+    filter: blur(8px) saturate(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0) saturate(1);
+  }
+}
+
+@keyframes imageLoadSheen {
+  0% {
+    transform: translateX(-125%);
+    opacity: 0.55;
+  }
+
+  48%,
+  100% {
+    transform: translateX(125%);
+    opacity: 0;
+  }
+}
+
+@keyframes scrimIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes promptIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes alertIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes waitSweep {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  58%,
+  100% {
+    transform: translateX(440%);
+  }
+}
+
+@keyframes waitTrackBreath {
+  0%,
+  100% {
+    opacity: 0.62;
+    filter: saturate(0.95);
+  }
+
+  50% {
+    opacity: 1;
+    filter: saturate(1.08);
+  }
+}
+
+/* Playground-inspired dark workspace skin. */
+:root {
+  --bg: #08090c;
+  --panel: rgba(24, 25, 30, 0.92);
+  --panel-strong: #191a1f;
+  --field: rgba(28, 29, 34, 0.94);
+  --line: rgba(255, 255, 255, 0.095);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --text: #f4f4f5;
+  --muted: #8b8d99;
+  --muted-strong: #c9cad2;
+  --accent: #3b82f6;
+  --accent-strong: #2563eb;
+  --accent-soft: rgba(59, 130, 246, 0.18);
+  --green: #34d399;
+  --green-soft: rgba(52, 211, 153, 0.12);
+  --gold: #facc15;
+  --hot: #fb7185;
+  --pink: #f472b6;
+  --sky: #60a5fa;
+  --glass-edge: rgba(255, 255, 255, 0.11);
+  --glass-edge-soft: rgba(255, 255, 255, 0.075);
+  --glass-tint: rgba(18, 19, 23, 0.82);
+  --shadow: 0 26px 70px rgba(0, 0, 0, 0.38);
+  --glass-blur: blur(22px) saturate(1.18);
+  color-scheme: dark;
+}
+
+html {
+  background: var(--bg);
+}
+
+body {
+  color: var(--text);
+  background:
+    radial-gradient(circle at 18% -8%, rgba(59, 130, 246, 0.13), transparent 28%),
+    radial-gradient(circle at 86% 12%, rgba(52, 211, 153, 0.08), transparent 24%),
+    linear-gradient(180deg, #0b0c10 0%, #07080b 62%, #050609 100%);
+  font-family:
+    "HarmonyOS Sans SC",
+    "Segoe UI Variable",
+    "Segoe UI",
+    "Microsoft YaHei",
+    sans-serif;
+}
+
+body::before {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.024) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.58), transparent 78%);
+}
+
+::selection {
+  color: #fff;
+  background: rgba(59, 130, 246, 0.78);
+}
+
+/* Light liquid-glass workspace refinement. */
+:root {
+  --bg: #f4f7fb;
+  --panel: rgba(255, 255, 255, 0.58);
+  --panel-strong: rgba(255, 255, 255, 0.78);
+  --field: rgba(255, 255, 255, 0.66);
+  --line: rgba(91, 111, 143, 0.18);
+  --line-strong: rgba(60, 78, 112, 0.26);
+  --text: #172033;
+  --muted: #6a7488;
+  --muted-strong: #3c4659;
+  --accent: #2177ff;
+  --accent-strong: #0f58d6;
+  --accent-soft: rgba(33, 119, 255, 0.12);
+  --green: #0c9f76;
+  --green-soft: rgba(12, 159, 118, 0.12);
+  --gold: #c28300;
+  --hot: #d9445f;
+  --sky: #0a8bdc;
+  --glass-edge: rgba(255, 255, 255, 0.86);
+  --glass-edge-soft: rgba(255, 255, 255, 0.54);
+  --glass-tint: rgba(255, 255, 255, 0.54);
+  --shadow: 0 26px 74px rgba(50, 70, 104, 0.18);
+  --glass-blur: blur(26px) saturate(1.24);
+  color-scheme: light;
+}
+
+html {
+  background: #eef3f8;
+}
+
+body {
+  color: var(--text);
+  background:
+    linear-gradient(120deg, rgba(232, 241, 255, 0.88) 0%, rgba(255, 255, 255, 0.96) 34%, rgba(235, 248, 245, 0.92) 100%),
+    linear-gradient(180deg, #fbfdff 0%, #eef4fa 100%);
+}
+
+body::before {
+  background-image:
+    linear-gradient(rgba(70, 91, 130, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 91, 130, 0.055) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.48), transparent 78%);
+}
+
