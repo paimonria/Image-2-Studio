@@ -2,7 +2,8 @@
 
 import {
   useMemo,
-  useRef
+  useRef,
+  useState
 } from "react";
 import { Wand2 } from "lucide-react";
 import type { ImageRecord } from "@/lib/types";
@@ -20,6 +21,7 @@ import { useTemplateActions } from "@/components/studio/hooks/use-template-actio
 import { useWorkspaceActions } from "@/components/studio/hooks/use-workspace-actions";
 import { useStudioCatalog } from "@/components/studio/hooks/use-studio-catalog";
 import { AuthGate } from "@/components/studio/auth-gate";
+import { AccountPasswordDialog } from "@/components/studio/account-password-dialog";
 import { SettingsDrawer } from "@/components/studio/settings-drawer";
 import { AdminDrawer } from "@/components/studio/admin-drawer";
 import { Topbar } from "@/components/studio/topbar";
@@ -103,6 +105,7 @@ function StudioAppContent() {
     assignProjectId,
     assignTagsText
   } = state;
+  const [accountPasswordOpen, setAccountPasswordOpen] = useState(false);
   const {
     setSelectedRecordId,
     setActiveView,
@@ -197,12 +200,14 @@ function StudioAppContent() {
     authEmail,
     authPassword,
     authError,
+    changingPassword,
     setAuthMode,
     setAuthEmail,
     setAuthPassword,
     setCurrentUser,
     submitAuth,
     logout,
+    changePassword,
     resetAuthSession
   } = useAuthSession({
     onAuthenticated: resetProviderSettingsState,
@@ -332,16 +337,22 @@ function StudioAppContent() {
     stageRef: lightboxInspectorStageRef,
     zoomLabel: lightboxZoomLabel,
     inspectorMeta: lightboxInspectorMeta,
+    hasPrevious: lightboxHasPrevious,
+    hasNext: lightboxHasNext,
+    positionLabel: lightboxPositionLabel,
     open: openLightbox,
     close: closeLightbox,
     resetTransform: resetLightboxTransform,
     enterInspector: enterLightboxInspector,
     leaveInspector: leaveLightboxInspector,
+    goPrevious: goPreviousLightboxRecord,
+    goNext: goNextLightboxRecord,
     handleImageLoad: handleLightboxImageLoad,
     updateScale: updateLightboxScale,
     handlePointerDown: handleLightboxPointerDown,
     handlePointerMove: handleLightboxPointerMove,
-    handlePointerEnd: handleLightboxPointerEnd
+    handlePointerEnd: handleLightboxPointerEnd,
+    handleStageDoubleClick: handleLightboxStageDoubleClick
   } = useLightboxState(records);
 
   const providerStatus = useMemo(
@@ -403,6 +414,14 @@ function StudioAppContent() {
     () => filteredRecords.filter((record) => selectedHistoryIdSet.has(record.id)),
     [filteredRecords, selectedHistoryIdSet]
   );
+  const filteredRecordIds = useMemo(
+    () => filteredRecords.map((record) => record.id),
+    [filteredRecords]
+  );
+  const allRecordIds = useMemo(
+    () => records.map((record) => record.id),
+    [records]
+  );
 
   const historyFiltersActive = Boolean(
     favoriteOnly
@@ -415,8 +434,8 @@ function StudioAppContent() {
   );
 
   const selectedRecord = useMemo(
-    () => selectedRecordId ? filteredRecords.find((record) => record.id === selectedRecordId) : undefined,
-    [filteredRecords, selectedRecordId]
+    () => selectedRecordId ? records.find((record) => record.id === selectedRecordId) : undefined,
+    [records, selectedRecordId]
   );
 
   const selectedRecordModel = useMemo(
@@ -845,9 +864,11 @@ function StudioAppContent() {
                 jobKill: t("jobKill"),
                 batchRetry: t("batchRetry"),
                 loadingMore: t("loadingMore"),
-                batch: locale === "zh" ? "\u6253\u5f00\u6279\u6b21" : "Batch",
-                track: locale === "zh" ? "\u8ffd\u8e2a" : "Track",
-                view: locale === "zh" ? "\u67e5\u770b" : "View",
+                openBatch: t("openBatch"),
+                trackProgress: t("trackProgress"),
+                viewResult: t("viewResult"),
+                viewFailureReason: t("viewFailureReason"),
+                jobBusy: t("jobBusy"),
                 noRecentJobs: locale === "zh" ? "\u6682\u65e0\u6700\u8fd1\u4efb\u52a1\u3002" : "No recent jobs.",
                 clearFinished: locale === "zh" ? "\u6e05\u7a7a\u5b8c\u6210/\u5931\u8d25" : "Clear finished",
                 clearAlerts: locale === "zh" ? "\u6e05\u7a7a\u63d0\u793a" : "Clear alerts",
@@ -858,7 +879,12 @@ function StudioAppContent() {
                 setJobMonitorOpen((current) => !current);
               }}
               onRefreshJobs={() => void loadJobs()}
-              onTrackJob={(job) => void trackImageJob(job)}
+              onTrackJob={(job) => {
+                if (job.status !== "failed") {
+                  setJobMonitorOpen(false);
+                }
+                void trackImageJob(job);
+              }}
               onChangeJobState={(jobId, action) => void changeImageJobState(jobId, action)}
               onRetryStandaloneJob={(job) => void retryStandaloneJob(job)}
               onClearFinished={() => void clearFinishedJobMonitorItems()}
@@ -884,6 +910,7 @@ function StudioAppContent() {
           }}
           onTopbarMenuOpenChange={setTopbarMenuOpen}
           onAdminOpen={() => setAdminOpen(true)}
+          onChangePasswordOpen={() => setAccountPasswordOpen(true)}
           onLocaleChange={setLocale}
           onOpenGenerationStudio={openGenerationStudio}
           onRefreshGallery={() => void loadHistory({ selectFirst: false })}
@@ -899,6 +926,9 @@ function StudioAppContent() {
             mode={lightboxMode}
             isDragging={lightboxDragging}
             stageRef={lightboxInspectorStageRef}
+            hasPrevious={lightboxHasPrevious}
+            hasNext={lightboxHasNext}
+            positionLabel={lightboxPositionLabel}
             zoomLabel={lightboxZoomLabel}
             inspectorMeta={lightboxInspectorMeta}
             scale={lightboxScale}
@@ -917,22 +947,42 @@ function StudioAppContent() {
               copyPrompt: t("copyPrompt"),
               zoomOut: locale === "zh" ? "\u7f29\u5c0f" : "Zoom out",
               resetZoom: locale === "zh" ? "\u91cd\u7f6e\u7f29\u653e" : "Reset zoom",
-              zoomIn: locale === "zh" ? "\u653e\u5927" : "Zoom in"
+              zoomIn: locale === "zh" ? "\u653e\u5927" : "Zoom in",
+              previousImage: locale === "zh" ? "\u4e0a\u4e00\u5f20" : "Previous",
+              nextImage: locale === "zh" ? "\u4e0b\u4e00\u5f20" : "Next",
+              fitToScreen: locale === "zh" ? "\u9002\u5e94\u5c4f\u5e55" : "Fit to screen",
+              originalSize: locale === "zh" ? "100% \u539f\u56fe" : "100%",
+              imageLoading: locale === "zh" ? "\u6b63\u5728\u52a0\u8f7d\u5927\u56fe" : "Loading image",
+              imageLoadFailed: locale === "zh" ? "\u5927\u56fe\u52a0\u8f7d\u5931\u8d25" : "Image failed to load",
+              openOriginal: locale === "zh" ? "\u6253\u5f00\u539f\u56fe" : "Open original"
             }}
             onClose={closeLightbox}
             onEnterInspector={enterLightboxInspector}
             onLeaveInspector={leaveLightboxInspector}
-            onResetZoom={resetLightboxTransform}
+            onFitToScreen={resetLightboxTransform}
+            onOriginalSize={() => updateLightboxScale(1)}
             onZoomOut={() => updateLightboxScale(lightboxScale / LIGHTBOX_BUTTON_ZOOM_STEP)}
             onZoomIn={() => updateLightboxScale(lightboxScale * LIGHTBOX_BUTTON_ZOOM_STEP)}
+            onPrevious={goPreviousLightboxRecord}
+            onNext={goNextLightboxRecord}
             onCopyPrompt={() => void copyPromptText(lightboxRecord)}
             onImageLoad={handleLightboxImageLoad}
             onPointerDown={handleLightboxPointerDown}
             onPointerMove={handleLightboxPointerMove}
             onPointerEnd={handleLightboxPointerEnd}
+            onStageDoubleClick={handleLightboxStageDoubleClick}
           />
         ) : null}
       >
+        <AccountPasswordDialog
+          open={accountPasswordOpen}
+          locale={locale}
+          changing={changingPassword}
+          t={t}
+          onClose={() => setAccountPasswordOpen(false)}
+          onChangePassword={changePassword}
+          onChanged={showRunNotice}
+        />
         <GenerationStudio
           activeView={activeView}
           loading={loading}
@@ -1019,7 +1069,7 @@ function StudioAppContent() {
               onRetryFailedBatchItems={() => void retryFailedBatchItems()}
               onChangeImageJobState={(jobId, action) => void changeImageJobState(jobId, action)}
               onRetryBatchItem={(item) => void retryBatchItem(item)}
-              onOpenLightbox={openLightbox}
+              onOpenLightbox={(recordId) => openLightbox(recordId, allRecordIds)}
               onStartContinueEdit={startContinueEdit}
               onCopyImage={(record) => void copyImage(record)}
               onCopyPromptText={(record) => void copyPromptText(record)}
@@ -1084,7 +1134,7 @@ function StudioAppContent() {
             onToggleHistorySelection={toggleHistorySelection}
             onOpenRecord={(recordId) => {
               setSelectedRecordId(recordId);
-              openLightbox(recordId);
+              openLightbox(recordId, filteredRecordIds);
             }}
             onToggleFavoriteRecord={toggleFavoriteRecord}
             onStartContinueEdit={startContinueEdit}

@@ -5,6 +5,7 @@ import {
   ImagePlus,
   Languages,
   Loader2,
+  LockKeyhole,
   LogOut,
   RefreshCw,
   Search,
@@ -56,6 +57,7 @@ type TopbarProps = {
   onResetHistoryFilters: () => void;
   onTopbarMenuOpenChange: Dispatch<SetStateAction<boolean>>;
   onAdminOpen: () => void;
+  onChangePasswordOpen: () => void;
   onLocaleChange: Dispatch<SetStateAction<Locale>>;
   onOpenGenerationStudio: () => void;
   onRefreshGallery: () => void;
@@ -102,6 +104,7 @@ export function Topbar({
   onResetHistoryFilters,
   onTopbarMenuOpenChange,
   onAdminOpen,
+  onChangePasswordOpen,
   onLocaleChange,
   onOpenGenerationStudio,
   onRefreshGallery,
@@ -346,6 +349,18 @@ export function Topbar({
                         {t("admin")}
                       </button>
                     )}
+                    <button
+                      className="topbar-menu-item"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        onTopbarMenuOpenChange(false);
+                        onChangePasswordOpen();
+                      }}
+                    >
+                      <LockKeyhole size={15} />
+                      {t("changePassword")}
+                    </button>
                     <button
                       className="topbar-menu-item"
                       type="button"

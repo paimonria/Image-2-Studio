@@ -1,4 +1,4 @@
-import { Check, Layers3, Loader2, Pause, Play, RefreshCw, Trash2, X } from "lucide-react";
+import { Check, Eye, Layers3, Loader2, Pause, Play, RefreshCw, Trash2, X } from "lucide-react";
 import type { CatalogResponse, ImageJobResponse } from "@/lib/types";
 import {
   isActiveImageJobStatus,
@@ -25,9 +25,11 @@ type JobMonitorLabels = {
   jobKill: string;
   batchRetry: string;
   loadingMore: string;
-  batch: string;
-  track: string;
-  view: string;
+  openBatch: string;
+  trackProgress: string;
+  viewResult: string;
+  viewFailureReason: string;
+  jobBusy: string;
   noRecentJobs: string;
   clearFinished: string;
   clearAlerts: string;
@@ -140,6 +142,15 @@ export function JobMonitor({
                       : job.status === "succeeded"
                         ? labels.batchSucceeded
                         : labels.batchFailed;
+                const actionDisabled = Boolean(trackingJobId || jobActionId);
+                const actionTitle = actionDisabled ? labels.jobBusy : undefined;
+                const actionLabel = job.batchId
+                  ? labels.openBatch
+                  : isActiveJob
+                    ? labels.trackProgress
+                    : job.status === "failed"
+                      ? labels.viewFailureReason
+                      : labels.viewResult;
 
                 return (
                   <div className={`job-monitor-row is-${job.status}`} data-job-status={job.status} data-testid="job-monitor-row" key={job.id}>
@@ -157,14 +168,14 @@ export function JobMonitor({
                     </div>
                     <div className="job-monitor-buttons">
                       {job.batchId ? (
-                        <button className="text-button tiny" type="button" disabled={Boolean(trackingJobId || jobActionId)} onClick={() => onTrackJob(job)}>
+                        <button className="text-button tiny" type="button" title={actionTitle} aria-label={actionLabel} disabled={actionDisabled} onClick={() => onTrackJob(job)}>
                           <Layers3 size={14} />
-                          {labels.batch}
+                          {labels.openBatch}
                         </button>
                       ) : (
-                        <button className="text-button tiny" type="button" disabled={Boolean(trackingJobId || jobActionId)} onClick={() => onTrackJob(job)}>
-                          <RefreshCw size={14} />
-                          {isActiveJob ? labels.track : labels.view}
+                        <button className="text-button tiny" type="button" title={actionTitle} aria-label={actionLabel} disabled={actionDisabled} onClick={() => onTrackJob(job)}>
+                          {isActiveJob ? <RefreshCw size={14} /> : <Eye size={14} />}
+                          {actionLabel}
                         </button>
                       )}
                       {isPausableImageJobStatus(job.status) && (

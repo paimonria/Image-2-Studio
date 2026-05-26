@@ -158,8 +158,8 @@ function normalizeCreateError(error: unknown, context?: CreateErrorContext): Nor
   if (isUpstreamTimeout(upstreamStatus, message)) {
     return {
       message: highResolution
-        ? "4K 鐢熷浘璇锋眰鍦ㄤ笂娓哥綉鍏宠秴鏃躲€傝鍏堟敼鐢?2K锛屾垨纭浣犵殑 OpenAI-compatible 缃戝叧鏀寔 4096px 杈撳嚭骞舵彁楂樿鍙栬秴鏃舵椂闂淬€?"
-        : "涓婃父鐢熷浘缃戝叧瓒呮椂锛屾病鏈夎繑鍥炲浘鐗囥€傝绋嶅悗閲嶈瘯锛屾垨鍒囨崲鏇村揩鐨勪緵搴斿晢/妯″瀷銆侀檷浣庡鏉傚害銆傚鏋滆繖鏄綘鑷繁鐨勭綉鍏筹紝璇锋彁楂樼綉鍏宠鍙栬秴鏃舵椂闂淬€?",
+        ? "4K 生图请求在上游网关超时。请先改用 2K，或确认你的 OpenAI-compatible 网关支持 4096px 输出并提高读取超时时间。"
+        : "上游生图网关超时，没有返回图片。请稍后重试，或切换更快的供应商/模型、降低复杂度。如果这是你自己的网关，请提高网关读取超时时间。",
       status: 504,
       kind: "upstream-timeout"
     };
@@ -168,8 +168,8 @@ function normalizeCreateError(error: unknown, context?: CreateErrorContext): Nor
   if (upstreamStatus && upstreamStatus >= 500) {
     return {
       message: highResolution
-        ? "4K 鐢熷浘璇锋眰琚笂娓哥綉鍏虫嫆缁濇垨澶勭悊澶辫触銆傝鍏堜娇鐢?2K锛屾垨纭浣犵殑 OpenAI-compatible 缃戝叧鏀寔 4096px 杈撳嚭銆?"
-        : "涓婃父鐢熷浘鏈嶅姟鏆傛椂涓嶅彲鐢紝璇风◢鍚庨噸璇曟垨鍒囨崲渚涘簲鍟嗐€?",
+        ? "4K 生图请求被上游网关拒绝或处理失败。请先使用 2K，或确认你的 OpenAI-compatible 网关支持 4096px 输出。"
+        : "上游生图服务暂时不可用，请稍后重试或切换供应商。",
       status: 502,
       kind: "upstream"
     };
@@ -178,8 +178,8 @@ function normalizeCreateError(error: unknown, context?: CreateErrorContext): Nor
   if (/<html[\s>]|openresty|nginx/i.test(message)) {
     return {
       message: highResolution
-        ? "4K 鐢熷浘璇锋眰娌℃湁杩斿洖鏈夋晥鍥剧墖銆傝鍏堜娇鐢?2K锛屾垨妫€鏌ョ涓夋柟 Base URL銆佹ā鍨?ID 鍜?4096px 杈撳嚭鏀寔銆?"
-        : "涓婃父鏈嶅姟杩斿洖浜嗛潪鍥剧墖鍝嶅簲锛岀敓鎴愬け璐ャ€傝妫€鏌ョ涓夋柟 Base URL銆佹ā鍨?ID 鎴栫◢鍚庨噸璇曘€?",
+        ? "4K 生图请求没有返回有效图片。请先使用 2K，或检查第三方 Base URL、模型 ID 和 4096px 输出支持。"
+        : "上游服务返回了非图片响应，生成失败。请检查第三方 Base URL、模型 ID 或稍后重试。",
       status: 502,
       kind: "upstream"
     };

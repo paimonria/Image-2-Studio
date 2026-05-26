@@ -89,24 +89,7 @@ export async function createSession(userId: string) {
   });
 }
 
-export async function destroySession() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value;
-
-  if (token) {
-    await prisma.session.deleteMany({ where: { tokenHash: sha256(token) } });
-  }
-
-  cookieStore.set(SESSION_COOKIE, "", {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: shouldUseSecureSessionCookie(),
-    path: "/",
-    maxAge: 0
-  });
-}
-
-export async function getCurrentUser() {
+export async function getCurrentSession() {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -127,7 +110,38 @@ export async function getCurrentUser() {
     });
   }
 
-  return session.user;
+  return session;
+}
+
+export async function destroyOtherSessions(userId: string, currentSessionId: string) {
+  await prisma.session.deleteMany({
+    where: {
+      userId,
+      id: { not: currentSessionId }
+    }
+  });
+}
+
+export async function destroySession() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+
+  if (token) {
+    await prisma.session.deleteMany({ where: { tokenHash: sha256(token) } });
+  }
+
+  cookieStore.set(SESSION_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: shouldUseSecureSessionCookie(),
+    path: "/",
+    maxAge: 0
+  });
+}
+
+export async function getCurrentUser() {
+  const session = await getCurrentSession();
+  return session?.user ?? null;
 }
 
 export async function requireUser() {

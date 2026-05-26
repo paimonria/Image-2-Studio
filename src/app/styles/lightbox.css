@@ -43,7 +43,21 @@
   min-height: 42px;
 }
 
+.lightbox-nav-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lightbox-nav-strip .text-button {
+  min-width: 108px;
+  color: var(--muted-strong);
+  background: rgba(255, 255, 255, 0.54);
+}
+
 .lightbox-image-wrap {
+  position: relative;
   display: grid;
   min-height: 0;
   place-items: center;
@@ -70,11 +84,52 @@
 }
 
 .lightbox-image-button {
+  display: grid;
   width: 100%;
+  height: 100%;
+  place-items: center;
   border: 0;
   padding: 0;
   color: inherit;
+  background: transparent;
   cursor: zoom-in;
+}
+
+.lightbox-image-state {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  min-height: 40px;
+  max-width: min(360px, calc(100% - 32px));
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 0 13px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(12, 13, 16, 0.74);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(16px) saturate(1.16);
+  font-size: 13px;
+  font-weight: 800;
+  pointer-events: auto;
+}
+
+.lightbox-image-state a {
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.lightbox-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 900ms linear infinite;
 }
 
 .lightbox.is-inspector {
@@ -142,12 +197,36 @@
   background: transparent;
 }
 
+.lightbox-inspector-actions .icon-button:disabled {
+  opacity: 0.34;
+}
+
+.lightbox-zoom-text {
+  display: inline-grid;
+  min-width: 44px;
+  height: 34px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 9px;
+  color: rgba(255, 255, 255, 0.9);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.lightbox-zoom-text:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .lightbox-inspector-actions .icon-button:hover {
   color: #ffffff;
   background: rgba(255, 255, 255, 0.12);
 }
 
 .lightbox-inspector-stage {
+  position: relative;
   display: grid;
   width: 100%;
   height: 100%;
@@ -312,12 +391,20 @@
   height: min(94vh, 980px);
 }
 
+.lightbox-panel.has-nav {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
 .lightbox-image-wrap {
   min-height: 0;
 }
 
 .lightbox-panel img {
   max-height: calc(94vh - 190px);
+}
+
+.lightbox-panel.has-nav img {
+  max-height: calc(94vh - 230px);
 }
 
 .lightbox-prompt {
@@ -339,3 +426,6 @@
   max-height: calc(88vh - 190px);
 }
 
+.lightbox-panel.has-nav img {
+  max-height: calc(88vh - 230px);
+}

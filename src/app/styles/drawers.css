@@ -149,3 +149,49 @@
   border-top-color: rgba(80, 100, 135, 0.12);
 }
 
+.account-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  animation: scrimIn 220ms var(--ease-out) both;
+}
+
+.account-dialog-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(23, 32, 51, 0.42);
+  backdrop-filter: blur(10px) saturate(1.08);
+}
+
+.account-dialog-card {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(430px, calc(100vw - 32px));
+  gap: 14px;
+  border: 1px solid rgba(178, 190, 213, 0.46);
+  border-radius: 8px;
+  padding: 18px;
+  color: var(--text);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(250, 252, 255, 0.68)),
+    rgba(248, 251, 255, 0.76);
+  box-shadow:
+    0 28px 90px rgba(23, 32, 51, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(28px) saturate(1.18);
+  animation: lightboxIn 300ms var(--ease-out) both;
+}
+
+.account-dialog-card .drawer-head {
+  margin-bottom: 2px;
+}
+
+.account-dialog-secondary {
+  width: 100%;
+  justify-content: center;
+}

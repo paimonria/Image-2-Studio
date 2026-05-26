@@ -24,6 +24,7 @@
     "src/lib/job-monitor.ts",
     "src/lib/server/errors.ts",
     "src/lib/server/image-response.ts",
+    "src/lib/server/password-policy.ts",
     "src/lib/server/responses.ts",
     "src/lib/types.ts",
     "tests/**/*.ts"

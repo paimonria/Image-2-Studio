@@ -14,6 +14,7 @@ export function useAuthSession({ onAuthenticated, onLoggedOut }: UseAuthSessionO
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
 
   async function loadSession() {
     setAuthLoading(true);
@@ -54,6 +55,30 @@ export function useAuthSession({ onAuthenticated, onLoggedOut }: UseAuthSessionO
     onLoggedOut?.();
   }
 
+  async function changePassword(input: { currentPassword: string; newPassword: string }) {
+    setChangingPassword(true);
+    try {
+      const response = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input)
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string; user?: PublicUser };
+
+      if (!response.ok || !body.user) {
+        return {
+          ok: false,
+          error: body.error ?? "Password could not be changed."
+        };
+      }
+
+      setCurrentUser(body.user);
+      return { ok: true };
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
   function resetAuthSession(message?: string) {
     setCurrentUser(null);
     if (message) {
@@ -76,6 +101,7 @@ export function useAuthSession({ onAuthenticated, onLoggedOut }: UseAuthSessionO
     authEmail,
     authPassword,
     authError,
+    changingPassword,
     setAuthMode,
     setAuthEmail,
     setAuthPassword,
@@ -84,6 +110,7 @@ export function useAuthSession({ onAuthenticated, onLoggedOut }: UseAuthSessionO
     loadSession,
     submitAuth,
     logout,
+    changePassword,
     resetAuthSession
   };
 }
