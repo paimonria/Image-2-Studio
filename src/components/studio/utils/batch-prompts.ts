@@ -69,6 +69,25 @@ export function getBatchPromptTemplate(mode: ImageMode, locale: Locale) {
     : `${BATCH_PROMPT_START}\nSubject: glass greenhouse\nScene: morning mist, soft sunlight, wet stone path\nStyle: cinematic product poster, rich detail\n${BATCH_PROMPT_END}\n\n${BATCH_PROMPT_START}\nSubject: silver roadster\nScene: dusk by the sea, low camera angle\nStyle: editorial automotive photo\n${BATCH_PROMPT_END}`;
 }
 
+export function getEmptyBatchPromptBlock() {
+  return `${BATCH_PROMPT_START}\n\n${BATCH_PROMPT_END}`;
+}
+
+export function getBatchPromptBlock(content: string) {
+  return `${BATCH_PROMPT_START}\n${content}\n${BATCH_PROMPT_END}`;
+}
+
+export function insertBatchPromptTemplate(currentValue: string, mode: ImageMode, locale: Locale) {
+  return currentValue.trim()
+    ? `${currentValue.trimEnd()}\n\n${getEmptyBatchPromptBlock()}`
+    : getBatchPromptTemplate(mode, locale);
+}
+
+export function appendBatchPromptBlock(currentValue: string, content: string) {
+  const block = getBatchPromptBlock(content);
+  return currentValue.trim() ? `${currentValue.trimEnd()}\n\n${block}` : block;
+}
+
 export function getPromptFormat(value: string) {
   return value.includes(BATCH_PROMPT_START) || value.includes(BATCH_PROMPT_END) ? "blocks" : "lines";
 }

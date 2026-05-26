@@ -1,12 +1,10 @@
 "use client";
 
 import {
-  useMemo,
   useRef,
   useState
 } from "react";
 import { Wand2 } from "lucide-react";
-import type { ImageRecord } from "@/lib/types";
 import { GalleryPanel, getGalleryLabels } from "@/components/studio/gallery";
 import { useAdminPanel } from "@/components/studio/hooks/use-admin-panel";
 import { useAuthSession } from "@/components/studio/hooks/use-auth-session";
@@ -16,6 +14,7 @@ import { useGenerationActions } from "@/components/studio/hooks/use-generation-a
 import { useHistoryActions } from "@/components/studio/hooks/use-history-actions";
 import { useImageJobs } from "@/components/studio/hooks/use-image-jobs";
 import { useLightboxState } from "@/components/studio/hooks/use-lightbox-state";
+import { useStudioDerivedState } from "@/components/studio/hooks/use-studio-derived-state";
 import { useStudioEffects } from "@/components/studio/hooks/use-studio-effects";
 import { useTemplateActions } from "@/components/studio/hooks/use-template-actions";
 import { useWorkspaceActions } from "@/components/studio/hooks/use-workspace-actions";
@@ -32,30 +31,24 @@ import { StudioShell } from "@/components/studio/studio-shell";
 import { JobMonitor } from "@/components/studio/job-monitor";
 import { StudioLightbox } from "@/components/studio/lightbox";
 import { RawImage } from "@/components/studio/raw-image";
-import { isActiveImageJobStatus } from "@/lib/image-job-state";
-import { isFinishedImageJobStatus } from "@/lib/job-monitor";
 import { StudioProvider, useStudioState } from "@/components/studio/state/studio-context";
-import { parseBatchPrompts } from "@/components/studio/utils/batch-prompts";
 import { getCopy } from "@/components/studio/utils/copy";
 import { isUnauthorizedError } from "@/components/studio/utils/api-client";
 import {
-  formatDuration,
   getAspectRatioLabel,
   getGenerationDetailLabel,
   getModelLabel,
   getProviderLabel
 } from "@/components/studio/utils/format";
 import {
+  getResetHistoryFiltersState
+} from "@/components/studio/utils/studio-view-model";
+import {
   DEFAULT_RESOLUTION,
   DEFAULT_SITE_TITLE,
-  getComputedImageSize,
   HISTORY_PAGE_SIZE,
   LIGHTBOX_BUTTON_ZOOM_STEP,
-  MAX_BATCH_PROMPTS,
-  MAX_PROMPT_LENGTH,
-  modelSupports,
-  OFFICIAL_OPENAI_RESOLUTION,
-  RESOLUTION_OPTIONS
+  OFFICIAL_OPENAI_RESOLUTION
 } from "@/components/studio/utils/generation-options";
 
 export function StudioApp() {
@@ -356,176 +349,79 @@ function StudioAppContent() {
     handleStageDoubleClick: handleLightboxStageDoubleClick
   } = useLightboxState(records);
 
-  const providerStatus = useMemo(
-    () => catalog?.providers.find((item) => item.provider === provider),
-    [catalog, provider]
-  );
-
-  const providerModels = useMemo(
-    () => catalog?.models.filter((item) => item.provider === provider) ?? [],
-    [catalog, provider]
-  );
-
-  const selectedModel = useMemo(
-    () => providerModels.find((item) => item.modelId === model),
-    [model, providerModels]
-  );
-
-  const filteredRecords = useMemo(() => {
-    const query = historySearch.trim().toLowerCase();
-    const favorites = new Set(favoriteRecordIds);
-
-    return records.filter((record) => {
-      if (favoriteOnly && !favorites.has(record.id)) return false;
-      if (historyFilter.provider !== "all" && record.provider !== historyFilter.provider) return false;
-      if (historyFilter.model !== "all" && record.model !== historyFilter.model) return false;
-      if (historyBatchFilter !== "all" && record.batchId !== historyBatchFilter) return false;
-      if (historyProjectFilter !== "all" && record.projectId !== historyProjectFilter) return false;
-      if (historyTagFilter.trim()) {
-        const expectedTag = historyTagFilter.trim().toLowerCase();
-        if (!record.tags.some((tag) => tag.toLowerCase().includes(expectedTag))) return false;
-      }
-      if (!query) return true;
-
-      const searchable = [
-        record.prompt,
-        record.model,
-        record.provider,
-        record.size,
-        record.aspectRatio,
-        record.quality,
-        record.tags.join(" "),
-        projects.find((project) => project.id === record.projectId)?.name,
-        batches.find((batch) => batch.id === record.batchId)?.name,
-        getProviderLabel(catalog, record.provider),
-        getModelLabel(catalog, record.provider, record.model)
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return searchable.includes(query);
-    });
-  }, [batches, catalog, favoriteOnly, favoriteRecordIds, historyBatchFilter, historyFilter, historyProjectFilter, historySearch, historyTagFilter, projects, records]);
-
-  const favoriteRecordIdSet = useMemo(() => new Set(favoriteRecordIds), [favoriteRecordIds]);
-  const selectedHistoryIdSet = useMemo(() => new Set(selectedHistoryIds), [selectedHistoryIds]);
-  const deletingHistoryIdSet = useMemo(() => new Set(deletingHistoryIds), [deletingHistoryIds]);
-  const selectedHistoryRecords = useMemo(
-    () => filteredRecords.filter((record) => selectedHistoryIdSet.has(record.id)),
-    [filteredRecords, selectedHistoryIdSet]
-  );
-  const filteredRecordIds = useMemo(
-    () => filteredRecords.map((record) => record.id),
-    [filteredRecords]
-  );
-  const allRecordIds = useMemo(
-    () => records.map((record) => record.id),
-    [records]
-  );
-
-  const historyFiltersActive = Boolean(
-    favoriteOnly
-    || historySearch.trim()
-    || historyFilter.provider !== "all"
-    || historyFilter.model !== "all"
-    || historyBatchFilter !== "all"
-    || historyProjectFilter !== "all"
-    || historyTagFilter.trim()
-  );
-
-  const selectedRecord = useMemo(
-    () => selectedRecordId ? records.find((record) => record.id === selectedRecordId) : undefined,
-    [records, selectedRecordId]
-  );
-
-  const selectedRecordModel = useMemo(
-    () => selectedRecord
-      ? catalog?.models.find((item) => item.provider === selectedRecord.provider && item.modelId === selectedRecord.model)
-      : undefined,
-    [catalog, selectedRecord]
-  );
-
-  const selectedRecordCanContinue = Boolean(
-    selectedRecord
-    && catalog?.providers.find((item) => item.provider === selectedRecord.provider)?.configured
-    && modelSupports(selectedRecordModel, "continue-edit")
-  );
-
-  const activeSourceRecords = useMemo(
-    () => sourceImageIds
-      .map((id) => records.find((record) => record.id === id))
-      .filter((record): record is ImageRecord => Boolean(record)),
-    [records, sourceImageIds]
-  );
-
-  const canUseImageMode = modelSupports(selectedModel, "image-to-image");
-  const canContinueEdit = modelSupports(selectedModel, "continue-edit");
-  const isConfigured = Boolean(providerStatus?.configured);
-  const supportsCustomSize = Boolean(providerStatus?.supportsCustomSize);
-  const resolutionOptions = supportsCustomSize ? RESOLUTION_OPTIONS : RESOLUTION_OPTIONS.slice(0, 1);
-  const computedSize = useMemo(
-    () => getComputedImageSize(aspectRatio, resolution, supportsCustomSize),
-    [aspectRatio, resolution, supportsCustomSize]
-  );
-
-  const parsedBatchPrompts = useMemo(() => parseBatchPrompts(batchPromptText), [batchPromptText]);
-  const batchPrompts = parsedBatchPrompts.prompts;
-  const batchParseErrorKey = parsedBatchPrompts.errorKey;
-  const batchSucceededCount = batchItems.filter((item) => item.status === "succeeded").length;
-  const batchFailedCount = batchItems.filter((item) => item.status === "failed").length;
-  const batchPausedCount = batchItems.filter((item) => item.status === "paused").length;
-  const batchFinishedCount = batchSucceededCount + batchFailedCount;
-  const batchUnfinishedCount = Math.max(0, batchItems.length - batchFinishedCount);
-  const batchPausedOnly = batchUnfinishedCount > 0 && batchPausedCount === batchUnfinishedCount;
-  const batchProgressPercent = batchItems.length > 0 ? Math.round((batchFinishedCount / batchItems.length) * 100) : 0;
-  const batchElapsedLabel = formatDuration(batchElapsedSeconds);
-  const batchHasTooManyPrompts = batchPrompts.length > MAX_BATCH_PROMPTS;
-  const batchHasTooLongPrompt = batchPrompts.some((item) => item.length > MAX_PROMPT_LENGTH);
-  const batchPromptCounterLabel = generationInputMode === "batch"
-    ? (batchParseErrorKey ? t(batchParseErrorKey) : `${batchPrompts.length}/${MAX_BATCH_PROMPTS} ${t("batchPrompts")}`)
-    : `${prompt.length}/${MAX_PROMPT_LENGTH}`;
-  const allTags = useMemo(
-    () => Array.from(new Set(records.flatMap((record) => record.tags))).sort((left, right) => left.localeCompare(right)),
-    [records]
-  );
-  const visibleTemplates = useMemo(
-    () => templates.filter((template) => template.mode === "universal" || template.mode === mode),
-    [mode, templates]
-  );
-  const activeJobs = useMemo(
-    () => jobs.filter((job) => isActiveImageJobStatus(job.status)),
-    [jobs]
-  );
-  const failedJobs = useMemo(
-    () => jobs.filter((job) => job.status === "failed"),
-    [jobs]
-  );
-  const jobMonitorClearedAt = useMemo(() => {
-    if (!currentUser?.jobMonitorClearedAt) return null;
-
-    const clearedAt = new Date(currentUser.jobMonitorClearedAt);
-    return Number.isNaN(clearedAt.getTime()) ? null : clearedAt;
-  }, [currentUser?.jobMonitorClearedAt]);
-  const visibleFailedJobs = useMemo(() => {
-    if (!jobMonitorClearedAt) return failedJobs;
-
-    const clearedAtMs = jobMonitorClearedAt.getTime();
-    return failedJobs.filter((job) => {
-      const failedAt = job.finishedAt ? new Date(job.finishedAt) : new Date(job.createdAt);
-      return !Number.isNaN(failedAt.getTime()) && failedAt.getTime() > clearedAtMs;
-    });
-  }, [failedJobs, jobMonitorClearedAt]);
-  const jobMonitorAlertCount = activeJobs.length + visibleFailedJobs.length;
-  const succeededJobs = useMemo(
-    () => jobs.filter((job) => job.status === "succeeded"),
-    [jobs]
-  );
-  const finishedJobs = useMemo(
-    () => jobs.filter((job) => isFinishedImageJobStatus(job.status)),
-    [jobs]
-  );
-  const aspectRatioOptions = selectedModel?.supportedAspectRatios ?? ["auto", "1:1", "3:4", "4:3", "9:16", "16:9"];
+  const {
+    providerModels,
+    selectedModel,
+    canUseImageMode,
+    canContinueEdit,
+    isConfigured,
+    supportsCustomSize,
+    resolutionOptions,
+    computedSize,
+    aspectRatioOptions,
+    filteredRecords,
+    favoriteRecordIdSet,
+    selectedHistoryIdSet,
+    deletingHistoryIdSet,
+    selectedHistoryRecords,
+    filteredRecordIds,
+    allRecordIds,
+    historyFiltersActive,
+    selectedRecord,
+    selectedRecordCanContinue,
+    activeSourceRecords,
+    batchPrompts,
+    batchParseErrorKey,
+    batchSucceededCount,
+    batchFailedCount,
+    batchFinishedCount,
+    batchPausedOnly,
+    batchProgressPercent,
+    batchElapsedLabel,
+    batchHasTooManyPrompts,
+    batchHasTooLongPrompt,
+    batchPromptCounterLabel,
+    allTags,
+    visibleTemplates,
+    activeJobs,
+    finishedJobs,
+    jobMonitorAlertCount,
+    mainClassName,
+    jobMonitorLabels,
+    lightboxLabels
+  } = useStudioDerivedState({
+    activeView,
+    studioLayout,
+    catalog,
+    provider,
+    model,
+    mode,
+    aspectRatio,
+    resolution,
+    records,
+    batches,
+    projects,
+    templates,
+    favoriteOnly,
+    favoriteRecordIds,
+    historyFilter,
+    historyBatchFilter,
+    historyProjectFilter,
+    historyTagFilter,
+    historySearch,
+    selectedRecordId,
+    selectedHistoryIds,
+    deletingHistoryIds,
+    sourceImageIds,
+    batchPromptText,
+    generationInputMode,
+    prompt,
+    batchItems,
+    batchElapsedSeconds,
+    jobs,
+    jobMonitorClearedAt: currentUser?.jobMonitorClearedAt,
+    locale
+  });
   const renderBrandMark = () => (
     <div className={`brand-mark ${brandLogoUrl ? "has-logo" : ""}`}>
       {brandLogoUrl ? (
@@ -566,6 +462,16 @@ function StudioAppContent() {
 
     resetAuthenticatedState(locale === "zh" ? "登录已过期，请重新登录。" : "Your session expired. Please sign in again.");
     return true;
+  }
+
+  function resetHistoryFilters() {
+    const next = getResetHistoryFiltersState();
+    setHistorySearch(next.historySearch);
+    setFavoriteOnly(next.favoriteOnly);
+    setHistoryFilter(next.historyFilter);
+    setHistoryBatchFilter(next.historyBatchFilter);
+    setHistoryProjectFilter(next.historyProjectFilter);
+    setHistoryTagFilter(next.historyTagFilter);
   }
 
   const {
@@ -755,7 +661,7 @@ function StudioAppContent() {
       <StudioShell
         settingsOpen={settingsOpen}
         adminOpen={adminOpen}
-        mainClassName={`main view-${activeView} studio-layout-${studioLayout} ${selectedHistoryIds.length > 0 ? "has-selection-sidebar" : ""}`}
+        mainClassName={mainClassName}
         closeLabel={t("closePreview")}
         onCloseDrawers={() => {
           setSettingsOpen(false);
@@ -851,33 +757,7 @@ function StudioAppContent() {
               clearingFinished={jobMonitorFinishedClearing}
               trackingJobId={trackingJobId}
               jobActionId={jobActionId}
-              labels={{
-                title: locale === "zh" ? "\u4efb\u52a1\u76d1\u63a7" : "Job monitor",
-                activity: locale === "zh" ? "\u6d3b\u52a8\u4e2d\u5fc3" : "Activity",
-                summary: locale === "zh"
-                  ? `${activeJobs.length} \u6392\u961f/\u8fd0\u884c / ${failedJobs.length} \u5931\u8d25 / ${succeededJobs.length} \u5b8c\u6210`
-                  : `${activeJobs.length} active / ${failedJobs.length} failed / ${succeededJobs.length} done`,
-                refreshJobs: locale === "zh" ? "\u5237\u65b0\u4efb\u52a1" : "Refresh jobs",
-                batchPending: t("batchPending"),
-                batchPaused: t("batchPaused"),
-                batchRunning: t("batchRunning"),
-                batchSucceeded: t("batchSucceeded"),
-                batchFailed: t("batchFailed"),
-                batchPause: t("batchPause"),
-                batchResume: t("batchResume"),
-                jobKill: t("jobKill"),
-                batchRetry: t("batchRetry"),
-                loadingMore: t("loadingMore"),
-                openBatch: t("openBatch"),
-                trackProgress: t("trackProgress"),
-                viewResult: t("viewResult"),
-                viewFailureReason: t("viewFailureReason"),
-                jobBusy: t("jobBusy"),
-                noRecentJobs: locale === "zh" ? "\u6682\u65e0\u6700\u8fd1\u4efb\u52a1\u3002" : "No recent jobs.",
-                clearFinished: locale === "zh" ? "\u6e05\u7a7a\u5b8c\u6210/\u5931\u8d25" : "Clear finished",
-                clearAlerts: locale === "zh" ? "\u6e05\u7a7a\u63d0\u793a" : "Clear alerts",
-                refreshGallery: locale === "zh" ? "\u5237\u65b0\u56fe\u5e93" : "Refresh gallery"
-              }}
+              labels={jobMonitorLabels}
               onToggle={() => {
                 setTopbarMenuOpen(false);
                 setJobMonitorOpen((current) => !current);
@@ -904,14 +784,7 @@ function StudioAppContent() {
           onHistoryBatchFilterChange={setHistoryBatchFilter}
           onHistoryProjectFilterChange={setHistoryProjectFilter}
           onHistoryTagFilterChange={setHistoryTagFilter}
-          onResetHistoryFilters={() => {
-            setHistorySearch("");
-            setFavoriteOnly(false);
-            setHistoryFilter({ provider: "all", model: "all" });
-            setHistoryBatchFilter("all");
-            setHistoryProjectFilter("all");
-            setHistoryTagFilter("");
-          }}
+          onResetHistoryFilters={resetHistoryFilters}
           onTopbarMenuOpenChange={setTopbarMenuOpen}
           onAdminOpen={() => setAdminOpen(true)}
           onChangePasswordOpen={() => setAccountPasswordOpen(true)}
@@ -941,25 +814,7 @@ function StudioAppContent() {
             modelLabel={getModelLabel(catalog, lightboxRecord.provider, lightboxRecord.model)}
             detailLabel={getGenerationDetailLabel(lightboxRecord)}
             copiedPrompt={copiedPromptId === lightboxRecord.id}
-            labels={{
-              imagePreview: t("imagePreview"),
-              closePreview: t("closePreview"),
-              download: t("download"),
-              preview: t("preview"),
-              promptUsed: t("promptUsed"),
-              copied: t("copied"),
-              copyPrompt: t("copyPrompt"),
-              zoomOut: locale === "zh" ? "\u7f29\u5c0f" : "Zoom out",
-              resetZoom: locale === "zh" ? "\u91cd\u7f6e\u7f29\u653e" : "Reset zoom",
-              zoomIn: locale === "zh" ? "\u653e\u5927" : "Zoom in",
-              previousImage: locale === "zh" ? "\u4e0a\u4e00\u5f20" : "Previous",
-              nextImage: locale === "zh" ? "\u4e0b\u4e00\u5f20" : "Next",
-              fitToScreen: locale === "zh" ? "\u9002\u5e94\u5c4f\u5e55" : "Fit to screen",
-              originalSize: locale === "zh" ? "100% \u539f\u56fe" : "100%",
-              imageLoading: locale === "zh" ? "\u6b63\u5728\u52a0\u8f7d\u5927\u56fe" : "Loading image",
-              imageLoadFailed: locale === "zh" ? "\u5927\u56fe\u52a0\u8f7d\u5931\u8d25" : "Image failed to load",
-              openOriginal: locale === "zh" ? "\u6253\u5f00\u539f\u56fe" : "Open original"
-            }}
+            labels={lightboxLabels}
             onClose={closeLightbox}
             onEnterInspector={enterLightboxInspector}
             onLeaveInspector={leaveLightboxInspector}

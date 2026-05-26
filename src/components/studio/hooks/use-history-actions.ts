@@ -2,6 +2,22 @@ import type { ImageProjectResponse, ImageRecord } from "@/lib/types";
 import type { Locale } from "@/components/studio/utils/copy";
 import { useStudioState } from "@/components/studio/state/studio-context";
 import { fetchBlob, fetchJson } from "@/components/studio/utils/api-client";
+import {
+  getAssignImagesFailedMessage,
+  getCreateProjectFailedMessage,
+  getDeletedHistoryIds,
+  getDeleteHistoryImagesConfirmMessage,
+  getExportImagesFailedMessage,
+  getExportZipFileName,
+  getHistoryImageDownloadDelay,
+  getHistoryImageDownloadFileName,
+  getHistoryImagesDeleteFailedMessage,
+  getUniqueHistoryIds,
+  mergeHistoryIds,
+  removeHistoryIds,
+  parseAssignTags
+} from "@/components/studio/utils/history-action-helpers";
+import { formatImageRecordLinks } from "@/components/studio/utils/image-links";
 
 type UseHistoryActionsOptions = {
   locale: Locale;
@@ -70,8 +86,7 @@ export function useHistoryActions({
   }
 
   async function copySelectedImageLinks() {
-    const links = selectedHistoryRecords.map((record) => new URL(record.imageUrl, window.location.origin).toString());
-    await navigator.clipboard.writeText(links.join("\n"));
+    await navigator.clipboard.writeText(formatImageRecordLinks(selectedHistoryRecords, window.location.origin));
   }
 
   function downloadSelectedImages() {
@@ -79,43 +94,40 @@ export function useHistoryActions({
       window.setTimeout(() => {
         const link = document.createElement("a");
         link.href = record.imageUrl;
-        link.download = `image-2-${record.id}.png`;
+        link.download = getHistoryImageDownloadFileName(record.id);
         document.body.appendChild(link);
         link.click();
         link.remove();
-      }, index * 120);
+      }, getHistoryImageDownloadDelay(index));
     });
   }
 
   async function deleteHistoryImages(ids: string[]) {
-    const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+    const uniqueIds = getUniqueHistoryIds(ids);
     if (uniqueIds.length === 0) return;
 
-    const confirmed = window.confirm(uniqueIds.length === 1
-      ? (locale === "zh" ? "删除这张图片？此操作不可撤销。" : "Delete this image? This cannot be undone.")
-      : (locale === "zh" ? `删除选中的 ${uniqueIds.length} 张图片？此操作不可撤销。` : `Delete ${uniqueIds.length} selected images? This cannot be undone.`));
+    const confirmed = window.confirm(getDeleteHistoryImagesConfirmMessage(uniqueIds.length, locale));
     if (!confirmed) return;
 
     setError("");
-    setDeletingHistoryIds((current) => Array.from(new Set([...current, ...uniqueIds])));
+    setDeletingHistoryIds((current) => mergeHistoryIds(current, uniqueIds));
+    const fallbackMessage = getHistoryImagesDeleteFailedMessage(locale);
 
     try {
       const body = await fetchJson<{ deletedIds?: unknown }>("/api/images/history", {
         method: "DELETE",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ids: uniqueIds }),
-        fallbackMessage: locale === "zh" ? "图片删除失败。" : "Images could not be deleted."
+        fallbackMessage
       });
 
-      const deletedIds = Array.isArray(body.deletedIds)
-        ? body.deletedIds.filter((id): id is string => typeof id === "string")
-        : uniqueIds;
+      const deletedIds = getDeletedHistoryIds(body.deletedIds, uniqueIds);
       const deletedSet = new Set(deletedIds);
 
       setRecords((current) => current.filter((record) => !deletedSet.has(record.id)));
-      setSelectedHistoryIds((current) => current.filter((id) => !deletedSet.has(id)));
-      setFavoriteRecordIds((current) => current.filter((id) => !deletedSet.has(id)));
-      setSourceImageIds((current) => current.filter((id) => !deletedSet.has(id)));
+      setSelectedHistoryIds((current) => removeHistoryIds(current, deletedIds));
+      setFavoriteRecordIds((current) => removeHistoryIds(current, deletedIds));
+      setSourceImageIds((current) => removeHistoryIds(current, deletedIds));
       setSelectedRecordId((current) => deletedSet.has(current) ? "" : current);
       if (lightboxRecordId && deletedSet.has(lightboxRecordId)) {
         closeLightbox();
@@ -124,9 +136,9 @@ export function useHistoryActions({
       setCopiedPromptId((current) => deletedSet.has(current) ? "" : current);
     } catch (caught) {
       if (handleUnauthorized(caught)) return;
-      setError(caught instanceof Error ? caught.message : (locale === "zh" ? "图片删除失败。" : "Images could not be deleted."));
+      setError(caught instanceof Error ? caught.message : fallbackMessage);
     } finally {
-      setDeletingHistoryIds((current) => current.filter((id) => !uniqueIds.includes(id)));
+      setDeletingHistoryIds((current) => removeHistoryIds(current, uniqueIds));
     }
   }
 
@@ -134,7 +146,7 @@ export function useHistoryActions({
     const name = newProjectName.trim();
     if (!name) return;
 
-    const fallbackMessage = locale === "zh" ? "项目创建失败。" : "Project could not be created.";
+    const fallbackMessage = getCreateProjectFailedMessage(locale);
     let body: Partial<ImageProjectResponse>;
 
     try {
@@ -160,17 +172,10 @@ export function useHistoryActions({
     await loadProjects();
   }
 
-  function parseAssignTags() {
-    return assignTagsText
-      .split(/[,\n，]/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-
   async function assignSelectedImages() {
     if (selectedHistoryIds.length === 0) return;
 
-    const fallbackMessage = locale === "zh" ? "图片整理失败。" : "Images could not be organized.";
+    const fallbackMessage = getAssignImagesFailedMessage(locale);
     try {
       await fetchJson("/api/images/projects/assign", {
         method: "POST",
@@ -178,7 +183,7 @@ export function useHistoryActions({
         body: JSON.stringify({
           recordIds: selectedHistoryIds,
           projectId: assignProjectId || null,
-          tags: parseAssignTags()
+          tags: parseAssignTags(assignTagsText)
         }),
         fallbackMessage
       });
@@ -196,7 +201,7 @@ export function useHistoryActions({
     if (selectedHistoryIds.length === 0) return;
 
     let blob: Blob;
-    const fallbackMessage = locale === "zh" ? "导出失败。" : "Export failed.";
+    const fallbackMessage = getExportImagesFailedMessage(locale);
     try {
       blob = await fetchBlob("/api/images/export", {
         method: "POST",
@@ -213,7 +218,7 @@ export function useHistoryActions({
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `image-2-export-${Date.now()}.zip`;
+    link.download = getExportZipFileName();
     document.body.appendChild(link);
     link.click();
     link.remove();

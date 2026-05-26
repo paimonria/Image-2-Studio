@@ -1,12 +1,17 @@
 import type { RefObject } from "react";
 import type { PromptTemplateResponse } from "@/lib/types";
-import {
-  BATCH_PROMPT_END,
-  BATCH_PROMPT_START
-} from "@/components/studio/utils/batch-prompts";
+import { appendBatchPromptBlock } from "@/components/studio/utils/batch-prompts";
 import { useStudioState } from "@/components/studio/state/studio-context";
 import type { Locale } from "@/components/studio/utils/copy";
 import { fetchJson } from "@/components/studio/utils/api-client";
+import {
+  appendPromptTemplate,
+  getPromptTemplateSaveContent,
+  getPromptTemplateTitle,
+  getTemplateDeleteConfirmMessage,
+  getTemplateDeleteFailedMessage,
+  getTemplateSaveFailedMessage
+} from "@/components/studio/utils/template-action-helpers";
 
 type UseTemplateActionsOptions = {
   locale: Locale;
@@ -45,24 +50,23 @@ export function useTemplateActions({
 
   function applyPromptTemplate(template: PromptTemplateResponse) {
     if (generationInputMode === "batch") {
-      const block = `${BATCH_PROMPT_START}\n${template.content}\n${BATCH_PROMPT_END}`;
-      setBatchPromptText((current) => current.trim() ? `${current.trimEnd()}\n\n${block}` : block);
+      setBatchPromptText((current) => appendBatchPromptBlock(current, template.content));
     } else {
-      setPrompt((current) => current.trim() ? `${current.trimEnd()}\n${template.content}` : template.content);
+      setPrompt((current) => appendPromptTemplate(current, template.content));
     }
     setTemplateOpen(false);
     requestAnimationFrame(() => promptRef.current?.focus());
   }
 
   async function saveCurrentPromptAsTemplate() {
-    const content = generationInputMode === "batch" ? batchPromptText.trim() : prompt.trim();
+    const content = getPromptTemplateSaveContent({ generationInputMode, prompt, batchPromptText });
     if (!content) {
       setError(t("enterPrompt"));
       return;
     }
 
-    const title = templateTitle.trim() || content.split(/\s+/).slice(0, 8).join(" ").slice(0, 60) || "Prompt template";
-    const fallbackMessage = locale === "zh" ? "模板保存失败。" : "Template could not be saved.";
+    const title = getPromptTemplateTitle({ templateTitle, content });
+    const fallbackMessage = getTemplateSaveFailedMessage(locale);
     let body: Partial<PromptTemplateResponse>;
 
     try {
@@ -97,14 +101,14 @@ export function useTemplateActions({
   async function deletePromptTemplate(template: PromptTemplateResponse) {
     if (deletingTemplateId) return;
 
-    const confirmed = window.confirm(`${locale === "zh" ? "\u5220\u9664\u6a21\u677f" : "Delete template"}: ${template.title}`);
+    const fallbackMessage = getTemplateDeleteFailedMessage(locale);
+    const confirmed = window.confirm(getTemplateDeleteConfirmMessage(template.title, locale));
     if (!confirmed) return;
 
     setDeletingTemplateId(template.id);
     setError("");
 
     try {
-      const fallbackMessage = locale === "zh" ? "模板删除失败。" : "Template could not be deleted.";
       await fetchJson(`/api/images/templates/${template.id}`, {
         method: "DELETE",
         fallbackMessage
@@ -113,7 +117,7 @@ export function useTemplateActions({
       await loadTemplates();
     } catch (caught) {
       if (handleUnauthorized(caught)) return;
-      setError(caught instanceof Error ? caught.message : (locale === "zh" ? "模板删除失败。" : "Template could not be deleted."));
+      setError(caught instanceof Error ? caught.message : fallbackMessage);
     } finally {
       setDeletingTemplateId("");
     }

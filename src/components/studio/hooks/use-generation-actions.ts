@@ -1,13 +1,11 @@
 import type { FormEvent, RefObject } from "react";
 import type {
-  CreateImageJobResponse,
   ImageBatchDetailResponse,
   ImageJobResponse,
   ImageRecord
 } from "@/lib/types";
 import { isProviderId } from "@/lib/models";
 import type { ImageMode, ProviderId } from "@/lib/models";
-import { isRetryableBatchItemStatus } from "@/lib/image-job-state";
 import {
   batchItemToGenerationItem,
   type BatchGenerationItem
@@ -17,24 +15,65 @@ import { useStudioState } from "@/components/studio/state/studio-context";
 import {
   BATCH_QUEUE_TIMEOUT_MS,
   DEFAULT_MODE,
-  OFFICIAL_OPENAI_RESOLUTION,
   JOB_POLL_INTERVAL_MS,
   JOB_POLL_TIMEOUT_MS,
-  MAX_BATCH_PROMPTS,
-  MAX_PROMPT_LENGTH,
   STUDIO_LAYOUT_STORAGE_KEY,
-  isHighLoadResolution,
-  modelSupports,
+  getResolutionSelection,
   type GenerationInputMode
 } from "@/components/studio/utils/generation-options";
 import {
-  BATCH_PROMPT_END,
-  BATCH_PROMPT_START,
-  getBatchPromptTemplate,
+  insertBatchPromptTemplate as buildBatchPromptTemplateInsertion,
   getPromptFormat
 } from "@/components/studio/utils/batch-prompts";
 import type { Locale } from "@/components/studio/utils/copy";
-import { fetchJson } from "@/components/studio/utils/api-client";
+import {
+  buildBatchStartFormData,
+  buildImageJobFormData,
+  requestCreateImageJob,
+  requestImageBatch,
+  requestImageJob,
+  requestRetryImageBatchItems,
+  requestRetryImageJob,
+  requestStartImageBatch,
+  type ImageJobFormInput
+} from "@/components/studio/utils/generation-api";
+import {
+  validateBatchGenerationInput,
+  validateSingleGenerationInput,
+  type GenerationValidationFailure
+} from "@/components/studio/utils/generation-validation";
+import {
+  applyBatchGenerationItemDefaults,
+  buildOptimisticImageJob,
+  buildPendingGeneration,
+  buildRunningBatchRun,
+  buildRunningSingleRun,
+  canUseServerBatchRetry,
+  getBatchRetryItemIds,
+  getBatchPollingDeadline,
+  getCompletedBatchRunSummary,
+  getGenerationReferenceCount,
+  getLastSuccessfulBatchResultId,
+  getRetryableBatchItems,
+  hasBatchQueueTimeout
+} from "@/components/studio/utils/generation-run-builders";
+import {
+  getPolledImageJobDecision,
+  getPollImageJobPausedMessage,
+  getPollImageJobStillRunningMessage,
+  getTrackImageJobDecision,
+  getTrackImageJobPausedMessage
+} from "@/components/studio/utils/generation-job-tracking";
+import { getImageRecordUrl } from "@/components/studio/utils/image-links";
+import {
+  mergeReferenceFiles,
+  shouldSwitchToImageMode
+} from "@/components/studio/utils/reference-files";
+import { canContinueImageRecord } from "@/components/studio/utils/selected-record-context";
+import {
+  getSessionExpiredMessage,
+  isSessionExpiredError
+} from "@/components/studio/utils/session-expiry";
 
 type StudioRunInput = {
   id: string;
@@ -206,25 +245,15 @@ export function useGenerationActions({
   }
 
   function chooseResolution(nextResolution: string) {
-    if (!supportsCustomSize && nextResolution !== OFFICIAL_OPENAI_RESOLUTION) {
-      setResolution(OFFICIAL_OPENAI_RESOLUTION);
-      setQuickMenu(null);
-      setError(locale === "zh"
-        ? "官方 OpenAI 仅开放 1K；配置 OpenAI-compatible Base URL 后可使用 2K/4K。"
-        : "Official OpenAI only allows 1K here. Configure an OpenAI-compatible Base URL to use 2K/4K.");
-      return;
-    }
+    const selection = getResolutionSelection({
+      supportsCustomSize,
+      resolution: nextResolution,
+      locale
+    });
 
-    setResolution(nextResolution);
+    setResolution(selection.resolution);
     setQuickMenu(null);
-
-    if (isHighLoadResolution(nextResolution)) {
-      setError(locale === "zh"
-        ? "4K 会显著增加上游网关负载，部分 OpenAI-compatible 网关可能拒绝或超时；如果失败请改用 2K。"
-        : "4K is high load for upstream gateways. Some OpenAI-compatible gateways may reject it or time out; use 2K if it fails.");
-    } else {
-      setError("");
-    }
+    setError(selection.error);
   }
 
   function chooseQuality(nextQuality: string) {
@@ -287,9 +316,7 @@ export function useGenerationActions({
   function insertBatchPromptTemplate() {
     if (loading) return;
 
-    const template = getBatchPromptTemplate(mode, locale);
-    const emptyBlock = `${BATCH_PROMPT_START}\n\n${BATCH_PROMPT_END}`;
-    setBatchPromptText((current) => current.trim() ? `${current.trimEnd()}\n\n${emptyBlock}` : template);
+    setBatchPromptText((current) => buildBatchPromptTemplateInsertion(current, mode, locale));
     setError("");
     requestAnimationFrame(() => promptRef.current?.focus());
   }
@@ -297,10 +324,10 @@ export function useGenerationActions({
   function updateFiles(nextFiles: FileList | null) {
     if (!nextFiles) return;
 
-    const combined = [...files, ...Array.from(nextFiles)].slice(0, 4);
+    const combined = mergeReferenceFiles(files, nextFiles);
     setFiles(combined);
 
-    if (combined.length > 0 && canUseImageMode) {
+    if (shouldSwitchToImageMode(combined, canUseImageMode)) {
       setMode("image-to-image");
       setParamsOpen(true);
     }
@@ -413,90 +440,53 @@ export function useGenerationActions({
   }
 
   function canContinueRecord(record: ImageRecord) {
-    return Boolean(
-      isProviderId(record.provider)
-      && catalog?.providers.find((item) => item.provider === record.provider)?.configured
-      && modelSupports(catalog?.models.find((item) => item.provider === record.provider && item.modelId === record.model), "continue-edit")
-    );
+    return isProviderId(record.provider) && canContinueImageRecord(record, catalog);
   }
 
   function clearSource(id: string) {
     setSourceImageIds((current) => current.filter((item) => item !== id));
   }
 
-  function buildImageJobFormData(promptValue: string, batchMeta?: { batchId: string; itemId: string }) {
-    const formData = new FormData();
-    formData.set("provider", provider);
-    formData.set("model", model);
-    formData.set("mode", mode);
-    formData.set("prompt", promptValue);
-    formData.set("size", computedSize);
-    formData.set("aspectRatio", aspectRatio);
-    formData.set("resolution", resolution);
-    formData.set("quality", quality);
-    formData.set("inputFidelity", inputFidelity);
-    if (batchMeta) {
-      formData.set("batchId", batchMeta.batchId);
-      formData.set("batchItemId", batchMeta.itemId);
-    }
-    sourceImageIds.forEach((id) => formData.append("sourceImageIds", id));
-    files.forEach((file) => formData.append("files", file));
-
-    return formData;
-  }
-
-  function buildBatchStartFormData(prompts: string[]) {
-    const formData = buildImageJobFormData(prompts[0] ?? "");
-    formData.delete("prompt");
-    formData.set("prompts", JSON.stringify(prompts));
-    formData.set("promptFormat", getPromptFormat(batchPromptText));
-
-    return formData;
+  function getImageJobFormInput(promptValue: string): ImageJobFormInput {
+    return {
+      provider,
+      model,
+      mode,
+      prompt: promptValue,
+      size: computedSize,
+      aspectRatio,
+      resolution,
+      quality,
+      inputFidelity,
+      sourceImageIds,
+      files
+    };
   }
 
   async function createImageJob(promptValue: string, batchMeta?: { batchId: string; itemId: string }) {
-    let body: Partial<CreateImageJobResponse>;
     try {
-      body = await fetchJson<Partial<CreateImageJobResponse>>("/api/images/create", {
-        method: "POST",
-        body: buildImageJobFormData(promptValue, batchMeta),
-        fallbackMessage: t("generationFailed")
-      });
+      return await requestCreateImageJob(
+        buildImageJobFormData(getImageJobFormInput(promptValue), batchMeta),
+        t("generationFailed")
+      );
     } catch (caught) {
       if (handleUnauthorized(caught)) return null;
       throw caught;
     }
-
-    if (!body.jobId) {
-      throw new Error(t("generationFailed"));
-    }
-
-    return {
-      jobId: body.jobId,
-      status: body.status ?? "pending"
-    };
   }
 
   async function startBatch(prompts: string[]) {
     const fallbackMessage = locale === "zh" ? "批次启动失败。" : "Batch could not be started.";
-    let body: Partial<ImageBatchDetailResponse>;
 
     try {
-      body = await fetchJson<Partial<ImageBatchDetailResponse>>("/api/images/batches/start", {
-        method: "POST",
-        body: buildBatchStartFormData(prompts),
+      return await requestStartImageBatch(
+        buildBatchStartFormData(getImageJobFormInput(prompts[0] ?? ""), prompts, getPromptFormat(batchPromptText)),
         fallbackMessage
-      });
+      );
     } catch (caught) {
       if (handleUnauthorized(caught)) return null;
       throw caught;
     }
-
-    if (!body.id || !Array.isArray(body.items)) {
-      throw new Error(fallbackMessage);
-    }
-
-    return body as ImageBatchDetailResponse;
   }
 
   async function changeImageJobState(jobId: string, action: "pause" | "resume" | "kill") {
@@ -526,7 +516,7 @@ export function useGenerationActions({
 
     const created = await createImageJob(item.prompt, item.batchId ? { batchId: item.batchId, itemId: item.id } : undefined);
     if (!created) {
-      throw new Error(locale === "zh" ? "登录已过期，请重新登录。" : "Your session expired. Please sign in again.");
+      throw new Error(getSessionExpiredMessage(locale));
     }
 
     updateBatchItem(item.id, {
@@ -547,60 +537,39 @@ export function useGenerationActions({
     return job;
   }
 
-  function isSessionExpiredError(error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    return message.includes("session expired") || message.includes("登录已过期");
-  }
-
-  function getSessionExpiredMessage() {
-    return locale === "zh" ? "登录已过期，请重新登录。" : "Your session expired. Please sign in again.";
-  }
-
   async function pollImageJob(jobId: string) {
     const deadline = Date.now() + JOB_POLL_TIMEOUT_MS;
 
     while (Date.now() < deadline) {
-      let body: Partial<ImageJobResponse>;
-
+      let job: ImageJobResponse | null;
       try {
-        body = await fetchJson<Partial<ImageJobResponse>>(`/api/images/jobs/${jobId}`, {
-          cache: "no-store",
-          fallbackMessage: t("generationFailed")
-        });
+        job = await requestImageJob(jobId, t("generationFailed"));
       } catch (caught) {
         if (handleUnauthorized(caught)) {
-          throw new Error(getSessionExpiredMessage());
+          throw new Error(getSessionExpiredMessage(locale));
         }
         throw caught;
       }
 
-      const job = body.id && body.status ? body as ImageJobResponse : null;
       if (job) {
         mergeJobState(job);
       }
 
-      if (job?.status === "succeeded") {
-        if (!job.resultId) {
-          throw new Error(t("generationFailed"));
-        }
-
-        return job;
+      const decision = getPolledImageJobDecision(job, {
+        generationFailed: t("generationFailed"),
+        paused: getPollImageJobPausedMessage(locale)
+      });
+      if (decision.kind === "succeeded") {
+        return decision.job;
       }
-
-      if (job?.status === "failed") {
-        throw new Error(job.error || t("generationFailed"));
-      }
-
-      if (job?.status === "paused") {
-        throw new Error(locale === "zh" ? "\u4efb\u52a1\u5df2\u6682\u505c\uff0c\u6062\u590d\u540e\u4f1a\u7ee7\u7eed\u6392\u961f\u3002" : "The job is paused. Resume it to continue.");
+      if (decision.kind === "error") {
+        throw new Error(decision.message);
       }
 
       await wait(JOB_POLL_INTERVAL_MS);
     }
 
-    throw new Error(locale === "zh"
-      ? "生成任务仍在运行，请稍后刷新历史记录查看结果。"
-      : "The generation job is still running. Refresh history later to check the result.");
+    throw new Error(getPollImageJobStillRunningMessage(locale));
   }
 
   async function pollBatchUntilFinished(batchId: string, options: { runId?: string } = {}) {
@@ -610,31 +579,26 @@ export function useGenerationActions({
 
     while (Date.now() < deadline) {
       const fallbackMessage = locale === "zh" ? "批次状态加载失败。" : "Batch status could not be loaded.";
-      let body: Partial<ImageBatchDetailResponse>;
+      let batch: ImageBatchDetailResponse;
 
       try {
-        body = await fetchJson<Partial<ImageBatchDetailResponse>>(`/api/images/batches/${batchId}`, {
-          cache: "no-store",
-          fallbackMessage
-        });
+        batch = await requestImageBatch(batchId, fallbackMessage);
       } catch (caught) {
         if (handleUnauthorized(caught)) {
-          throw new Error(getSessionExpiredMessage());
+          throw new Error(getSessionExpiredMessage(locale));
         }
         throw caught;
       }
 
-      if (!body.id || !Array.isArray(body.items)) {
-        throw new Error(fallbackMessage);
-      }
-
-      latest = body as ImageBatchDetailResponse;
+      latest = batch;
       const updateStudio = shouldUpdateStudio();
       mergeBatchJobStates(latest, { updateBatchItems: updateStudio });
-      const batchStartedAt = new Date(latest.createdAt).getTime();
-      if (!Number.isNaN(batchStartedAt)) {
-        deadline = batchStartedAt + BATCH_QUEUE_TIMEOUT_MS + JOB_POLL_INTERVAL_MS;
-      }
+      deadline = getBatchPollingDeadline({
+        createdAt: latest.createdAt,
+        currentDeadline: deadline,
+        timeoutMs: BATCH_QUEUE_TIMEOUT_MS,
+        pollIntervalMs: JOB_POLL_INTERVAL_MS
+      });
 
       const active = isBatchDetailActive(latest);
       if (updateStudio) {
@@ -647,13 +611,13 @@ export function useGenerationActions({
         await loadBatches();
         await loadHistory({ selectFirst: updateStudio });
         await loadJobs();
-        if (updateStudio && latest.items.some((item) => item.error?.includes("10 minute queue limit"))) {
+        if (updateStudio && hasBatchQueueTimeout(latest.items)) {
           setError(t("batchTimedOut"));
         }
 
-        const lastSuccessful = [...latest.items].reverse().find((item) => item.resultId);
-        if (updateStudio && lastSuccessful?.resultId) {
-          setSelectedRecordId(lastSuccessful.resultId);
+        const lastSuccessfulResultId = getLastSuccessfulBatchResultId(latest.items);
+        if (updateStudio && lastSuccessfulResultId) {
+          setSelectedRecordId(lastSuccessfulResultId);
         }
         return latest;
       }
@@ -664,7 +628,7 @@ export function useGenerationActions({
     const finalBatch = shouldUpdateStudio()
       ? await loadBatchDetail(batchId, { showInStudio: false })
       : latest;
-    if (shouldUpdateStudio() && finalBatch?.items.some((item) => item.error?.includes("10 minute queue limit"))) {
+    if (shouldUpdateStudio() && finalBatch && hasBatchQueueTimeout(finalBatch.items)) {
       setError(t("batchTimedOut"));
     }
 
@@ -716,13 +680,15 @@ export function useGenerationActions({
     void (async () => {
       try {
         const batch = await pollBatchUntilFinished(batchId, { runId });
-        const failed = batch?.items.some((item) => item.status === "failed") ?? false;
-        const timedOut = batch?.items.some((item) => item.error?.includes("10 minute queue limit")) ?? false;
+        const summary = getCompletedBatchRunSummary(batch?.items ?? [], {
+          batchTimedOut: t("batchTimedOut"),
+          generationFailed: t("generationFailed")
+        });
 
         updateStudioRun(runId, {
-          status: failed ? "failed" : "succeeded",
+          status: summary.status,
           background: !isActiveStudioRun(runId),
-          error: failed ? (timedOut ? t("batchTimedOut") : t("generationFailed")) : undefined
+          error: summary.error
         });
         await loadBatches();
         await loadHistory({ selectFirst: isActiveStudioRun(runId) });
@@ -730,11 +696,11 @@ export function useGenerationActions({
 
         if (isActiveStudioRun(runId)) {
           setBatchRunning(false);
-          if (timedOut) {
+          if (summary.timedOut) {
             setError(t("batchTimedOut"));
           }
         } else {
-          showRunNotice(failed ? t("backgroundRunFailed") : t("backgroundRunComplete"));
+          showRunNotice(summary.failed ? t("backgroundRunFailed") : t("backgroundRunComplete"));
         }
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : t("generationFailed");
@@ -768,32 +734,28 @@ export function useGenerationActions({
     await submitSingle();
   }
 
+  function handleGenerationValidationFailure(result: GenerationValidationFailure) {
+    setError(t(result.errorKey));
+    if (result.openSettings) {
+      setSettingsOpen(true);
+    }
+  }
+
+  function getReferenceCount() {
+    return getGenerationReferenceCount({ files, sourceImageIds });
+  }
+
   async function submitSingle() {
-    if (!selectedModel) {
-      setError(t("chooseModelFirst"));
-      setSettingsOpen(true);
-      return;
-    }
+    const validation = validateSingleGenerationInput({
+      hasSelectedModel: Boolean(selectedModel),
+      isConfigured,
+      mode,
+      referenceCount: getReferenceCount(),
+      prompt
+    });
 
-    if (!isConfigured) {
-      setError(t("providerNoKey"));
-      setSettingsOpen(true);
-      return;
-    }
-
-    const singlePrompt = prompt.trim();
-    if (!singlePrompt) {
-      setError(t("enterPrompt"));
-      return;
-    }
-
-    if (singlePrompt.length > MAX_PROMPT_LENGTH) {
-      setError(t("batchPromptTooLong"));
-      return;
-    }
-
-    if (mode === "image-to-image" && files.length + sourceImageIds.length === 0) {
-      setError(t("imageNeedsReference"));
+    if (!validation.ok) {
+      handleGenerationValidationFailure(validation);
       return;
     }
 
@@ -801,47 +763,44 @@ export function useGenerationActions({
     setActiveBatchId("");
     resetBatchTiming();
     const runStartedAt = Date.now();
-    const pending: PendingGeneration = {
+    const pending = buildPendingGeneration({
       provider,
       model,
       mode,
-      prompt: singlePrompt,
+      prompt: validation.prompt,
       size: computedSize,
       aspectRatio,
       quality,
-      sourceImageIds: [...sourceImageIds],
-      fileNames: files.map((file) => file.name),
+      sourceImageIds,
+      files,
       startedAt: runStartedAt
-    };
+    });
     setPendingGeneration(pending);
     setLoading(true);
     let launched = false;
 
     try {
-      const created = await createImageJob(singlePrompt);
+      const created = await createImageJob(validation.prompt);
       if (!created) return;
 
       launched = true;
       const runId = createStudioRunId("single", created.jobId);
-      upsertStudioRun({
-        id: runId,
-        kind: "single",
-        status: "running",
-        startedAt: runStartedAt,
-        background: false,
+      upsertStudioRun(buildRunningSingleRun({
+        runId,
         jobId: created.jobId,
-        prompt: singlePrompt
-      });
+        startedAt: runStartedAt,
+        prompt: validation.prompt
+      }));
       setActiveStudioRun(runId);
-      mergeJobState({
-        id: created.jobId,
+      mergeJobState(buildOptimisticImageJob({
+        jobId: created.jobId,
         status: created.status ?? "pending",
         provider,
         model,
         mode,
-        prompt: singlePrompt,
-        createdAt: new Date(runStartedAt).toISOString()
-      });
+        prompt: validation.prompt,
+        createdAt: runStartedAt
+      }));
       startSingleRunPoll(runId, created.jobId);
       void loadJobs("active").catch((caught) => {
         console.warn("[images/jobs] active jobs refresh failed after single launch", {
@@ -865,65 +824,36 @@ export function useGenerationActions({
 
   async function submitBatch() {
     try {
-      if (!selectedModel) {
-        setError(t("chooseModelFirst"));
-        setSettingsOpen(true);
-        return;
-      }
+      const validation = validateBatchGenerationInput({
+        hasSelectedModel: Boolean(selectedModel),
+        isConfigured,
+        mode,
+        referenceCount: getReferenceCount(),
+        batchParseErrorKey,
+        prompts: batchPrompts
+      });
 
-      if (!isConfigured) {
-        setError(t("providerNoKey"));
-        setSettingsOpen(true);
-        return;
-      }
-
-      if (batchParseErrorKey) {
-        setError(t(batchParseErrorKey));
-        return;
-      }
-
-      const prompts = batchPrompts;
-      if (prompts.length === 0) {
-        setError(t("enterPrompt"));
-        return;
-      }
-
-      if (prompts.length > MAX_BATCH_PROMPTS) {
-        setError(t("batchTooManyPrompts"));
-        return;
-      }
-
-      if (prompts.some((item) => item.length > MAX_PROMPT_LENGTH)) {
-        setError(t("batchPromptTooLong"));
-        return;
-      }
-
-      if (mode === "image-to-image" && files.length + sourceImageIds.length === 0) {
-        setError(t("imageNeedsReference"));
+      if (!validation.ok) {
+        handleGenerationValidationFailure(validation);
         return;
       }
 
       setLoading(true);
-      const batch = await startBatch(prompts);
+      const batch = await startBatch(validation.prompts);
       if (!batch) return;
 
-      const initialItems = batch.items.map((item) => ({
-        ...batchItemToGenerationItem(item),
-        size: computedSize,
-        aspectRatio,
-        quality
-      }));
+      const initialItems = applyBatchGenerationItemDefaults(
+        batch.items.map(batchItemToGenerationItem),
+        { size: computedSize, aspectRatio, quality }
+      );
 
       const runId = createStudioRunId("batch", batch.id);
-      upsertStudioRun({
-        id: runId,
-        kind: "batch",
-        status: "running",
-        startedAt: new Date(batch.createdAt).getTime() || Date.now(),
-        background: false,
+      upsertStudioRun(buildRunningBatchRun({
+        runId,
         batchId: batch.id,
+        createdAt: batch.createdAt,
         totalCount: batch.items.length
-      });
+      }));
       setActiveStudioRun(runId);
       setActiveBatchId(batch.id);
       setBatchItems(initialItems);
@@ -945,25 +875,15 @@ export function useGenerationActions({
     if (!activeBatchId || itemIds.length === 0) return;
 
     const fallbackMessage = locale === "zh" ? "重试失败。" : "Retry failed.";
-    let body: Partial<ImageBatchDetailResponse>;
+    let batch: ImageBatchDetailResponse;
 
     try {
-      body = await fetchJson<Partial<ImageBatchDetailResponse>>(`/api/images/batches/${activeBatchId}/retry`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ itemIds }),
-        fallbackMessage
-      });
+      batch = await requestRetryImageBatchItems(activeBatchId, itemIds, fallbackMessage);
     } catch (caught) {
       if (handleUnauthorized(caught)) return;
       throw caught;
     }
 
-    if (!body.id || !Array.isArray(body.items)) {
-      throw new Error(fallbackMessage);
-    }
-
-    const batch = body as ImageBatchDetailResponse;
     setBatchItems(batch.items.map(batchItemToGenerationItem));
     updateBatchTiming(batch, true);
     await pollBatchUntilFinished(activeBatchId);
@@ -971,15 +891,15 @@ export function useGenerationActions({
   }
 
   async function retryBatchItem(item: BatchGenerationItem) {
-    if (loading || item.status !== "failed") return;
+    if (loading || getRetryableBatchItems([item]).length === 0) return;
 
     setError("");
     setBatchRunning(true);
     setLoading(true);
 
     try {
-      if (activeBatchId && item.batchId) {
-        await retryBatchOnServer([item.id]);
+      if (canUseServerBatchRetry(activeBatchId, [item])) {
+        await retryBatchOnServer(getBatchRetryItemIds([item]));
       } else {
         const job = await runBatchItem(item);
         await loadHistory();
@@ -1001,7 +921,7 @@ export function useGenerationActions({
   }
 
   async function retryFailedBatchItems() {
-    const failedItems = batchItems.filter((item) => isRetryableBatchItemStatus(item.status));
+    const failedItems = getRetryableBatchItems(batchItems);
     if (loading || failedItems.length === 0) return;
 
     setError("");
@@ -1010,8 +930,8 @@ export function useGenerationActions({
     let lastResultId = "";
 
     try {
-      if (activeBatchId && failedItems.every((item) => item.batchId)) {
-        await retryBatchOnServer(failedItems.map((item) => item.id));
+      if (canUseServerBatchRetry(activeBatchId, failedItems)) {
+        await retryBatchOnServer(getBatchRetryItemIds(failedItems));
         return;
       }
 
@@ -1047,38 +967,37 @@ export function useGenerationActions({
 
   async function trackImageJob(job: ImageJobResponse) {
     setError("");
+    const decision = getTrackImageJobDecision(job, {
+      generationFailed: t("generationFailed"),
+      paused: getTrackImageJobPausedMessage(locale)
+    });
 
-    if (job.batchId) {
-      await loadBatchDetail(job.batchId, {
+    if (decision.kind === "batch") {
+      await loadBatchDetail(decision.batchId, {
         showInStudio: true
       });
-      if (job.status === "pending" || job.status === "running") {
-        await pollBatchUntilFinished(job.batchId);
+      if (decision.shouldPoll) {
+        await pollBatchUntilFinished(decision.batchId);
       }
       await loadJobs();
       return;
     }
 
-    if (job.status === "succeeded" && job.resultId) {
+    if (decision.kind === "select-result") {
       await loadHistory();
-      setSelectedRecordId(job.resultId);
+      setSelectedRecordId(decision.resultId);
       setActiveView("studio");
       return;
     }
 
-    if (job.status === "failed") {
-      setError(job.error || t("generationFailed"));
+    if (decision.kind === "error") {
+      setError(decision.message);
       return;
     }
 
-    if (job.status === "paused") {
-      setError(locale === "zh" ? "\u4efb\u52a1\u5df2\u6682\u505c\uff0c\u8bf7\u5148\u6062\u590d\u4efb\u52a1\u3002" : "This job is paused. Resume it before tracking.");
-      return;
-    }
-
-    setTrackingJobId(job.id);
+    setTrackingJobId(decision.jobId);
     try {
-      const finished = await pollImageJob(job.id);
+      const finished = await pollImageJob(decision.jobId);
       await loadHistory();
       await loadJobs();
       if (finished.resultId) {
@@ -1104,17 +1023,10 @@ export function useGenerationActions({
 
     try {
       const fallbackMessage = locale === "zh" ? "任务重试失败。" : "Job retry failed.";
-      const body = await fetchJson<Partial<CreateImageJobResponse>>(`/api/images/jobs/${job.id}/retry`, {
-        method: "POST",
-        fallbackMessage
-      });
-
-      if (!body.jobId) {
-        throw new Error(fallbackMessage);
-      }
+      const retried = await requestRetryImageJob(job.id, fallbackMessage);
 
       await loadJobs();
-      const finished = await pollImageJob(body.jobId);
+      const finished = await pollImageJob(retried.jobId);
       await loadHistory();
       await loadJobs();
       if (finished.resultId) {
@@ -1131,8 +1043,7 @@ export function useGenerationActions({
   }
 
   async function copyImage(record: ImageRecord) {
-    const url = new URL(record.imageUrl, window.location.origin).toString();
-    await navigator.clipboard.writeText(url);
+    await navigator.clipboard.writeText(getImageRecordUrl(record, window.location.origin));
     setCopiedId(record.id);
     window.setTimeout(() => setCopiedId(""), 1400);
   }

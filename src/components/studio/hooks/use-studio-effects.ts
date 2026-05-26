@@ -6,6 +6,7 @@ import {
   DEFAULT_RESOLUTION,
   OFFICIAL_OPENAI_RESOLUTION,
   STUDIO_LAYOUT_STORAGE_KEY,
+  getResolutionSelection,
   modelSupports,
   type QuickMenu,
   type StudioLayout
@@ -117,13 +118,16 @@ export function useStudioEffects({
 
   useEffect(() => {
     if (!currentUser || !catalog || !selectedModel) return;
-    if (supportsCustomSize || resolution === OFFICIAL_OPENAI_RESOLUTION) return;
+    const selection = getResolutionSelection({
+      supportsCustomSize,
+      resolution,
+      locale
+    });
+    if (selection.resolution === resolution) return;
 
-    setResolution(OFFICIAL_OPENAI_RESOLUTION);
+    setResolution(selection.resolution);
     setQuickMenu((current) => current === "resolution" ? null : current);
-    setError(locale === "zh"
-      ? "官方 OpenAI 仅开放 1K；配置 OpenAI-compatible Base URL 后可使用 2K/4K。"
-      : "Official OpenAI only allows 1K here. Configure an OpenAI-compatible Base URL to use 2K/4K.");
+    setError(selection.error);
   }, [catalog, currentUser, locale, resolution, selectedModel, setError, setQuickMenu, setResolution, supportsCustomSize]);
 
   useEffect(() => {
