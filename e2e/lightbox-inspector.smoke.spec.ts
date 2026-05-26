@@ -179,3 +179,62 @@ test("gallery image opens a second-level zoomable inspector", async ({ page }) =
   await expect(page.getByTestId("lightbox-detail")).toBeHidden();
   expect(consoleErrors).toEqual([]);
 });
+
+test("mobile lightbox supports zoom reset and layered close", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      consoleErrors.push(message.text());
+    }
+  });
+
+  const requestCounts = await mockLightboxApi(page);
+  await page.goto("/");
+
+  await page.getByTestId("auth-email").fill(user.email);
+  await page.getByTestId("auth-password").fill("correct horse battery staple");
+  await page.getByTestId("auth-submit").click();
+
+  await expect(page.getByTestId("history-card-preview")).toBeVisible();
+  await page.getByTestId("history-card-preview").click();
+
+  await expect(page.getByTestId("lightbox-detail")).toBeVisible();
+  await expect.poll(() => requestCounts.originalGet).toBeGreaterThan(0);
+  await page.getByTestId("lightbox-enter-inspector").click();
+
+  await expect(page.getByTestId("lightbox-inspector")).toBeVisible();
+  await expect(page.getByTestId("lightbox-zoom-label")).toHaveText("100%");
+
+  const inspectorFits = await page.getByTestId("lightbox-inspector").evaluate((element) => {
+    const toolbar = element.querySelector<HTMLElement>(".lightbox-inspector-toolbar");
+    const actions = element.querySelector<HTMLElement>(".lightbox-inspector-actions");
+    const stage = element.querySelector<HTMLElement>(".lightbox-inspector-stage");
+    const closeButton = element.querySelector<HTMLElement>(".lightbox-inspector-close");
+    const elements = [toolbar, actions, stage, closeButton].filter((item): item is HTMLElement => Boolean(item));
+
+    return elements.every((item) => {
+      const rect = item.getBoundingClientRect();
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        rect.left >= -1 &&
+        rect.right <= window.innerWidth + 1 &&
+        rect.top >= -1 &&
+        rect.bottom <= window.innerHeight + 1;
+    });
+  });
+  expect(inspectorFits).toBe(true);
+
+  await page.getByTestId("lightbox-inspector-stage").dblclick();
+  await expect(page.getByTestId("lightbox-zoom-label")).toHaveText("200%");
+  await page.getByTestId("lightbox-reset-zoom").click();
+  await expect(page.getByTestId("lightbox-zoom-label")).toHaveText("100%");
+
+  await page.getByTestId("lightbox-inspector-close").click();
+  await expect(page.getByTestId("lightbox-detail")).toBeVisible();
+  await expect(page.getByTestId("lightbox-inspector")).toBeHidden();
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("lightbox-detail")).toBeHidden();
+  expect(consoleErrors).toEqual([]);
+});

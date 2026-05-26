@@ -26,6 +26,19 @@ describe("deployment configuration guardrails", () => {
     assert.match(workflow, /APP_VERSION=\$\{\{ steps\.meta\.outputs\.version \}\}/);
   });
 
+  it("runs the application verification gate before Docker build and publish", () => {
+    const workflow = read(".github/workflows/docker-image.yml");
+    const verifyIndex = workflow.indexOf("run: pnpm verify");
+    const buildxIndex = workflow.indexOf("uses: docker/setup-buildx-action");
+    const buildPushIndex = workflow.indexOf("uses: docker/build-push-action");
+
+    assert.notEqual(verifyIndex, -1);
+    assert.notEqual(buildxIndex, -1);
+    assert.notEqual(buildPushIndex, -1);
+    assert.ok(verifyIndex < buildxIndex);
+    assert.ok(verifyIndex < buildPushIndex);
+  });
+
   it("keeps pull requests non-publishing while allowing controlled manual publishing", () => {
     const workflow = read(".github/workflows/docker-image.yml");
 
@@ -118,5 +131,17 @@ describe("deployment configuration guardrails", () => {
     assert.match(packageJson.scripts?.verify ?? "", /pnpm run test:jobs/);
     assert.match(packageJson.scripts?.verify ?? "", /pnpm run build:worker/);
     assert.match(packageJson.scripts?.verify ?? "", /pnpm run build/);
+  });
+
+  it("keeps the verification gate runnable on Linux CI", () => {
+    const packageJson = JSON.parse(read("package.json")) as { scripts?: Record<string, string> };
+    const validateScript = read("scripts/db-validate-sqlite.mjs");
+
+    assert.equal(packageJson.scripts?.["db:validate"], "node scripts/db-validate-sqlite.mjs");
+    assert.doesNotMatch(packageJson.scripts?.verify ?? "", /powershell|pnpm\.cmd/);
+    assert.doesNotMatch(packageJson.scripts?.["db:validate"] ?? "", /powershell|pnpm\.cmd/);
+    assert.match(validateScript, /DATABASE_URL/);
+    assert.match(validateScript, /file:\.\/dev\.db/);
+    assert.match(validateScript, /prisma", "validate"/);
   });
 });

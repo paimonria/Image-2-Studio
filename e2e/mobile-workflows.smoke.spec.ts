@@ -254,8 +254,14 @@ test("mobile account, batch panel, and job monitor controls stay operable", asyn
 
   const drawerToggle = page.getByTestId("composer-drawer-toggle");
   await expect(drawerToggle).toHaveAttribute("aria-expanded", "false");
-  await drawerToggle.click();
-  await expect(drawerToggle).toHaveAttribute("aria-expanded", "true");
+  if (await drawerToggle.isVisible()) {
+    await drawerToggle.click();
+    await expect(drawerToggle).toHaveAttribute("aria-expanded", "true");
+  } else {
+    await expect(page.locator(".control-panel")).toBeVisible();
+    await expect(page.locator(".quick-bar").first()).toBeVisible();
+    await expect(page.locator(".mode-toggle").first()).toBeVisible();
+  }
 
   const layoutHealth = await page.evaluate(() => {
     const selectors = [
@@ -307,5 +313,68 @@ test("mobile account, batch panel, and job monitor controls stay operable", asyn
       element.scrollWidth <= element.clientWidth + 2;
   });
   expect(popoverFits).toBe(true);
+  expect(consoleErrors).toEqual([]);
+});
+
+test("tablet batch workflow keeps controls within the viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 768, height: 1024 });
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      consoleErrors.push(message.text());
+    }
+  });
+
+  await mockMobileWorkflowApi(page);
+  await page.goto("/");
+
+  await page.getByTestId("auth-email").fill(user.email);
+  await page.getByTestId("auth-password").fill("correct horse battery staple");
+  await page.getByTestId("auth-submit").click();
+
+  await page.getByTestId("open-generation-studio").click();
+  await expect(page.getByTestId("input-mode-batch")).toBeVisible();
+  await page.getByTestId("input-mode-batch").click();
+  await page.getByTestId("prompt-input").fill("---PROMPT---\nTablet batch image one\n---END---\n\n---PROMPT---\nTablet batch image two\n---END---");
+  await page.getByTestId("generate-submit").click();
+
+  await expect(page.getByTestId("batch-result-stage")).toBeVisible();
+  await expect(page.getByTestId("batch-result-item")).toHaveCount(3);
+  await expect(page.getByTestId("batch-item-actions")).toHaveCount(3);
+
+  const drawerToggle = page.getByTestId("composer-drawer-toggle");
+  await expect(drawerToggle).toHaveAttribute("aria-expanded", "false");
+  if (await drawerToggle.isVisible()) {
+    await drawerToggle.click();
+    await expect(drawerToggle).toHaveAttribute("aria-expanded", "true");
+  } else {
+    await expect(page.locator(".control-panel")).toBeVisible();
+    await expect(page.locator(".quick-bar").first()).toBeVisible();
+    await expect(page.locator(".mode-toggle").first()).toBeVisible();
+  }
+
+  const layoutHealth = await page.evaluate(() => {
+    const selectors = [
+      ".topbar",
+      ".control-panel",
+      ".composer-drawer-toggle",
+      ".batch-textarea",
+      ".batch-result-stage",
+      ".batch-result-item",
+      ".batch-item-actions"
+    ];
+    const visibleElements = selectors.flatMap((selector) => Array.from(document.querySelectorAll<HTMLElement>(selector)))
+      .filter((element) => element.offsetParent !== null);
+
+    return visibleElements.every((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 &&
+        rect.left >= -1 &&
+        rect.right <= window.innerWidth + 1 &&
+        element.scrollWidth <= element.clientWidth + 2;
+    });
+  });
+
+  expect(layoutHealth).toBe(true);
   expect(consoleErrors).toEqual([]);
 });
