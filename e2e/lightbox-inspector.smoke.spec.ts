@@ -152,7 +152,12 @@ test("gallery image opens a second-level zoomable inspector", async ({ page }) =
 
   await expect(page.getByTestId("lightbox-detail")).toBeVisible();
   await expect.poll(() => requestCounts.originalGet).toBeGreaterThan(0);
-  await page.getByTestId("lightbox-detail-image").click();
+  await expect.poll(() => requestCounts.originalHead).toBeGreaterThan(0);
+  await expect(page.getByTestId("lightbox-detail-meta")).toContainText("1672 x 941");
+  await expect(page.getByTestId("lightbox-detail-download")).toHaveAttribute("href", `/api/images/file/${imageId}`);
+  await expect(page.getByTestId("lightbox-open-original")).toHaveAttribute("href", `/api/images/file/${imageId}`);
+  await expect(page.getByTestId("lightbox-copy-prompt")).toBeVisible();
+  await page.getByTestId("lightbox-enter-inspector").click();
 
   await expect(page.getByTestId("lightbox-inspector")).toBeVisible();
   await expect(page.getByTestId("lightbox-zoom-label")).toHaveText("100%");

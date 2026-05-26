@@ -43,6 +43,44 @@
   min-height: 42px;
 }
 
+.lightbox-heading {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.lightbox-head .result-meta {
+  min-width: 0;
+}
+
+.lightbox-detail-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lightbox-head-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(178, 190, 213, 0.34);
+  border-radius: 8px;
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+}
+
+.lightbox-head-actions .icon-button {
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+}
+
 .lightbox-nav-strip {
   display: flex;
   align-items: center;

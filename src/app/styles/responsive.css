@@ -1101,12 +1101,40 @@
   }
 
   .lightbox-head {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
     min-height: 38px;
+  }
+
+  .lightbox-heading {
+    gap: 4px;
   }
 
   .lightbox-head .result-meta {
     max-height: 62px;
     overflow: auto;
+  }
+
+  .lightbox-detail-meta {
+    font-size: 11px;
+  }
+
+  .lightbox-head-actions {
+    width: 100%;
+    overflow-x: auto;
+    justify-content: flex-start;
+    scrollbar-width: none;
+  }
+
+  .lightbox-head-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .lightbox-head-actions .icon-button {
+    width: 40px;
+    min-width: 40px;
+    min-height: 40px;
   }
 
   .lightbox-nav-strip .text-button {

@@ -4,7 +4,7 @@ import type {
   PointerEvent as ReactPointerEvent,
   RefObject
 } from "react";
-import { Check, ChevronLeft, ChevronRight, Copy, Download, ImageOff, Minus, Plus, RotateCcw, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, ImageOff, Maximize2, Minus, Plus, RotateCcw, X } from "lucide-react";
 import type { ImageRecord } from "@/lib/types";
 import { RawImage } from "./raw-image";
 
@@ -239,15 +239,36 @@ export function StudioLightbox({
       ) : (
         <div className={`lightbox-panel ${hasPrevious || hasNext ? "has-nav" : ""}`} data-testid="lightbox-detail">
           <div className="lightbox-head">
-            <div className="result-meta">
-              <span className="tag is-provider">{providerLabel}</span>
-              <span className="tag">{modelLabel}</span>
-              <span className="tag">{detailLabel}</span>
-              {positionLabel && <span className="tag">{positionLabel}</span>}
+            <div className="lightbox-heading">
+              <div className="result-meta">
+                <span className="tag is-provider">{providerLabel}</span>
+                <span className="tag">{modelLabel}</span>
+                <span className="tag">{detailLabel}</span>
+                {positionLabel && <span className="tag">{positionLabel}</span>}
+              </div>
+              {inspectorMeta && (
+                <div className="lightbox-detail-meta" data-testid="lightbox-detail-meta">
+                  {inspectorMeta}
+                </div>
+              )}
             </div>
-            <button className="icon-button" type="button" title={labels.closePreview} onClick={onClose}>
-              <X size={18} />
-            </button>
+            <div className="lightbox-head-actions">
+              <button className="icon-button" data-testid="lightbox-enter-inspector" type="button" title={labels.preview} aria-label={labels.preview} onClick={onEnterInspector}>
+                <Maximize2 size={17} />
+              </button>
+              <button className="icon-button" data-testid="lightbox-copy-prompt" type="button" title={labels.copyPrompt} aria-label={labels.copyPrompt} onClick={onCopyPrompt}>
+                {copiedPrompt ? <Check size={17} /> : <Copy size={17} />}
+              </button>
+              <a className="icon-button" data-testid="lightbox-detail-download" title={labels.download} aria-label={labels.download} href={record.imageUrl} download>
+                <Download size={17} />
+              </a>
+              <a className="icon-button" data-testid="lightbox-open-original" title={labels.openOriginal} aria-label={labels.openOriginal} href={record.imageUrl} target="_blank" rel="noreferrer">
+                <ExternalLink size={17} />
+              </a>
+              <button className="icon-button" type="button" title={labels.closePreview} aria-label={labels.closePreview} onClick={onClose}>
+                <X size={18} />
+              </button>
+            </div>
           </div>
           {(hasPrevious || hasNext) && (
             <div className="lightbox-nav-strip">
