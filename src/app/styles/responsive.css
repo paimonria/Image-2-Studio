@@ -821,21 +821,50 @@
 }
 
 @media (max-width: 720px) {
-  .gallery-hero,
+  .view-gallery .gallery-hero,
   .studio-stage-head {
     display: grid;
     gap: 12px;
     padding: 14px;
   }
 
+  .view-gallery .gallery-hero {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .view-gallery .gallery-hero > div {
+    min-width: 0;
+  }
+
   .studio-stage-head > div {
     text-align: left;
   }
 
-  .gallery-create-button,
   .studio-stage-head .text-button,
   .studio-stage-head .status-pill {
     justify-self: stretch;
+  }
+
+  .topbar-create-button,
+  .gallery-create-button {
+    width: 42px;
+    min-width: 42px;
+    min-height: 42px;
+    justify-content: center;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .topbar-create-button svg,
+  .gallery-create-button svg {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+  }
+
+  .gallery-create-button {
+    justify-self: end;
   }
 
   .view-studio .control-panel {
@@ -845,12 +874,18 @@
   }
 
   .view-studio .control-panel > .panel-heading {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .view-studio .control-panel > .panel-heading > div {
+  .view-studio .control-panel > .panel-heading > div:not(.control-heading-actions) {
     grid-column: 1;
     grid-row: 1;
+    min-width: 0;
+  }
+
+  .view-studio .control-panel > .panel-heading h1 {
+    font-size: 18px;
+    overflow-wrap: anywhere;
   }
 
   .view-studio .control-panel > .panel-heading .icon-button {
@@ -861,6 +896,7 @@
   .view-studio .control-heading-actions {
     grid-column: 2;
     grid-row: 1;
+    min-width: max-content;
   }
 
   .view-studio .studio-back-button {

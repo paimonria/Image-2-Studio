@@ -223,6 +223,32 @@ test("mobile account, batch panel, and job monitor controls stay operable", asyn
   await page.getByTestId("auth-submit").click();
 
   await expect(page.getByTestId("open-generation-studio")).toBeVisible();
+  await expect(page.locator(".gallery-create-button")).toBeVisible();
+
+  const createButtonsAligned = await page.evaluate(() => {
+    const topbarButton = document.querySelector<HTMLElement>(".topbar-create-button");
+    const galleryButton = document.querySelector<HTMLElement>(".gallery-create-button");
+
+    if (!topbarButton || !galleryButton) {
+      return false;
+    }
+
+    const topbarRect = topbarButton.getBoundingClientRect();
+    const galleryRect = galleryButton.getBoundingClientRect();
+    const sizeDelta = Math.max(
+      Math.abs(topbarRect.width - galleryRect.width),
+      Math.abs(topbarRect.height - galleryRect.height)
+    );
+
+    return topbarRect.width > 0 &&
+      topbarRect.height > 0 &&
+      galleryRect.width > 0 &&
+      galleryRect.height > 0 &&
+      sizeDelta <= 2 &&
+      topbarRect.right <= window.innerWidth + 1 &&
+      galleryRect.right <= window.innerWidth + 1;
+  });
+  expect(createButtonsAligned).toBe(true);
 
   await page.getByTestId("job-monitor-toggle").click();
   await expect(page.getByTestId("job-monitor-popover")).toBeVisible();
@@ -244,6 +270,32 @@ test("mobile account, batch panel, and job monitor controls stay operable", asyn
 
   await page.getByTestId("open-generation-studio").click();
   await expect(page.getByTestId("input-mode-batch")).toBeVisible();
+
+  const studioHeaderFits = await page.evaluate(() => {
+    const heading = document.querySelector<HTMLElement>(".view-studio .control-panel > .panel-heading");
+    const title = heading?.querySelector<HTMLElement>("h1");
+    const actions = heading?.querySelector<HTMLElement>(".control-heading-actions");
+
+    if (!heading || !title || !actions) {
+      return false;
+    }
+
+    const headingRect = heading.getBoundingClientRect();
+    const titleRect = title.getBoundingClientRect();
+    const actionsRect = actions.getBoundingClientRect();
+    const titleOverlapsActions = titleRect.left < actionsRect.right &&
+      titleRect.right > actionsRect.left &&
+      titleRect.top < actionsRect.bottom &&
+      titleRect.bottom > actionsRect.top;
+
+    return !titleOverlapsActions &&
+      titleRect.left >= headingRect.left - 1 &&
+      actionsRect.right <= headingRect.right + 1 &&
+      headingRect.left >= -1 &&
+      headingRect.right <= window.innerWidth + 1;
+  });
+  expect(studioHeaderFits).toBe(true);
+
   await page.getByTestId("input-mode-batch").click();
   await expect(page.getByTestId("input-mode-batch")).toHaveClass(/is-active/);
   await page.getByTestId("prompt-input").fill("---PROMPT---\nMobile batch image one\n---END---\n\n---PROMPT---\nMobile batch image two\n---END---");

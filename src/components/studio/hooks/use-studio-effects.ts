@@ -1,16 +1,14 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { CatalogResponse, ImageRecord, PublicUser } from "@/lib/types";
 import type { ImageMode } from "@/lib/models";
 import type { Locale } from "@/components/studio/utils/copy";
 import {
-  DEFAULT_RESOLUTION,
-  OFFICIAL_OPENAI_RESOLUTION,
   STUDIO_LAYOUT_STORAGE_KEY,
   getResolutionSelection,
-  modelSupports,
   type QuickMenu,
   type StudioLayout
 } from "@/components/studio/utils/generation-options";
+import { resolveModelDefaultSelection } from "@/components/studio/utils/model-defaults";
 
 type Setter<T> = (value: T | ((current: T) => T)) => void;
 
@@ -89,6 +87,8 @@ export function useStudioEffects({
   setFilePreviewUrls,
   setSelectedHistoryIds
 }: UseStudioEffectsOptions) {
+  const lastAppliedModelDefaultsRef = useRef<string | null>(null);
+
   useEffect(() => {
     try {
       const savedLayout = window.localStorage.getItem(STUDIO_LAYOUT_STORAGE_KEY);
@@ -131,23 +131,27 @@ export function useStudioEffects({
   }, [catalog, currentUser, locale, resolution, selectedModel, setError, setQuickMenu, setResolution, supportsCustomSize]);
 
   useEffect(() => {
-    if (providerModels.length === 0) return;
+    const selection = resolveModelDefaultSelection({
+      providerModels,
+      model,
+      lastAppliedModelKey: lastAppliedModelDefaultsRef.current,
+      supportsCustomSize
+    });
+    if (!selection) return;
 
-    const nextModel = providerModels.find((item) => item.modelId === model) ?? providerModels[0];
-    if (!nextModel) return;
-
-    if (nextModel.modelId !== model) {
-      setModel(nextModel.modelId);
+    if (selection.shouldSwitchModel) {
+      setModel(selection.model.modelId);
     }
 
-    const nextAspectRatio = nextModel.defaultAspectRatio ?? "3:4";
-    const nextResolution = supportsCustomSize ? DEFAULT_RESOLUTION : OFFICIAL_OPENAI_RESOLUTION;
-    setAspectRatio(nextAspectRatio);
-    setResolution(nextResolution);
-    setQuality(nextModel.defaultQuality ?? "medium");
-    setInputFidelity(nextModel.inputFidelityOptions?.[0] ?? "high");
+    if (selection.shouldApplyDefaults) {
+      setAspectRatio(selection.defaultAspectRatio);
+      setResolution(selection.defaultResolution);
+      setQuality(selection.defaultQuality);
+      setInputFidelity(selection.defaultInputFidelity);
+      lastAppliedModelDefaultsRef.current = selection.modelKey;
+    }
 
-    if (!modelSupports(nextModel, "image-to-image")) {
+    if (selection.shouldClearImageMode) {
       setMode("text-to-image");
       setSourceImageIds([]);
     }
@@ -169,13 +173,11 @@ export function useStudioEffects({
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
     window.addEventListener("resize", closeQuickMenu);
-    window.addEventListener("scroll", closeQuickMenu, { passive: true });
 
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("resize", closeQuickMenu);
-      window.removeEventListener("scroll", closeQuickMenu);
     };
   }, [quickMenu, setQuickMenu]);
 

@@ -1408,17 +1408,22 @@
 
 .view-studio .control-panel > .panel-heading {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   grid-column: 1 / -1;
   order: 0;
 }
 
-.view-studio .control-panel > .panel-heading > div {
+.view-studio .control-panel > .panel-heading > div:not(.control-heading-actions) {
   min-width: 0;
-  justify-self: center;
-  text-align: center;
+  justify-self: stretch;
+  text-align: left;
+}
+
+.view-studio .control-heading-actions {
+  min-width: max-content;
+  flex-shrink: 0;
 }
 
 .view-studio .control-panel > .panel-heading .icon-button {
@@ -1574,10 +1579,10 @@
 }
 
 .view-studio .quick-menu {
-  top: calc(100% + 8px);
-  bottom: auto;
+  top: auto;
+  bottom: calc(100% + 8px);
   width: min(204px, calc(100vw - 32px));
-  transform-origin: top left;
+  transform-origin: bottom left;
 }
 
 .view-studio .quick-menu-model {
@@ -1600,7 +1605,7 @@
 .view-studio .quick-control:nth-last-child(-n + 2) .spec-menu {
   right: 0;
   left: auto;
-  transform-origin: top right;
+  transform-origin: bottom right;
 }
 
 /* Batch generation overrides must follow the studio/mobile layout rules. */

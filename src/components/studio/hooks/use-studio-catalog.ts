@@ -94,6 +94,7 @@ export function useStudioCatalog({
 
   async function loadCatalog() {
     try {
+      const shouldApplyDefaultSelection = catalog === null;
       const body = await fetchJson<CatalogResponse>("/api/images/catalog", {
         cache: "no-store",
         fallbackMessage: messages.catalogLoadFailed
@@ -103,6 +104,7 @@ export function useStudioCatalog({
       }
 
       setCatalog(body);
+      if (!shouldApplyDefaultSelection) return;
 
       const preferred = body.providers.find((item) => item.provider === "openai" && item.configured)
         ?? body.providers.find((item) => item.configured)
