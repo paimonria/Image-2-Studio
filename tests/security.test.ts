@@ -6,6 +6,8 @@ import { AppError } from "../src/lib/server/errors";
 import { assertStorageFilePath, validateUploadedImageBuffer } from "../src/lib/server/files";
 import { assertProductionConfiguration } from "../src/lib/server/production-guardrails";
 import {
+  DEFAULT_FORM_BODY_LIMIT_BYTES,
+  assertRequestContentLength,
   assertRateLimit,
   assertSameOrigin,
   readLimitedJsonBody,
@@ -52,6 +54,25 @@ describe("server security helpers", () => {
         method: "POST",
         body: JSON.stringify({ value: "x".repeat(100) })
       }), 16),
+      (error) => error instanceof AppError && error.status === 413
+    );
+  });
+
+  it("rejects oversized multipart requests by content length before parsing form data", () => {
+    assert.doesNotThrow(() => assertRequestContentLength(makeRequest("https://app.example.com/api/test", {
+      method: "POST",
+      headers: {
+        "content-length": String(DEFAULT_FORM_BODY_LIMIT_BYTES)
+      }
+    })));
+
+    assert.throws(
+      () => assertRequestContentLength(makeRequest("https://app.example.com/api/test", {
+        method: "POST",
+        headers: {
+          "content-length": String(DEFAULT_FORM_BODY_LIMIT_BYTES + 1)
+        }
+      })),
       (error) => error instanceof AppError && error.status === 413
     );
   });

@@ -1293,13 +1293,13 @@
   }
 
   .view-studio .textarea {
-    min-height: 88px;
-    max-height: 34vh;
+    min-height: 136px;
+    max-height: 42vh;
     font-size: 16px;
   }
 
   .view-studio .batch-textarea {
-    min-height: min(40vh, 300px);
+    min-height: min(46vh, 340px);
   }
 
   .view-studio .batch-result-stage {

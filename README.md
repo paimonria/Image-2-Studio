@@ -75,17 +75,56 @@ IMAGE_TAG=latest
 
 `latest` is updated automatically when a `v*` tag is pushed.
 
-For single-host scale deployments, keep one PostgreSQL, one Redis, and one shared `./storage` directory, then layer the scale compose file on top of the default stack:
+For single-host scale deployments, keep one PostgreSQL, one Redis, and one shared `./storage` directory, then layer the scale compose file on top of the default stack. See [README.zh.md](./README.zh.md) for the full operational runbook.
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.scale.yml --profile migrate run --rm image-2-migrate
-docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale image-2-studio=2 --scale image-2-worker=2
+docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale image-2-studio=2 --scale image-2-worker=4
 docker compose -f docker-compose.yml -f docker-compose.scale.yml ps
 ```
 
-`docker-compose.scale.yml` routes scaled web containers through the bundled Nginx proxy and keeps image generation in Redis-backed workers. Target generation concurrency is roughly `worker replicas × IMAGE_WORKER_CONCURRENCY`.
+Recommended starting environment:
+
+```env
+WEB_REPLICAS=2
+WORKER_REPLICAS=4
+DATABASE_CONNECTION_LIMIT=5
+WORKER_DATABASE_CONNECTION_LIMIT=5
+MIGRATE_DATABASE_CONNECTION_LIMIT=5
+IMAGE_QUEUE_PREFIX=image2
+IMAGE_WORKER_CONCURRENCY=4
+IMAGE_QUEUE_ATTEMPTS=3
+IMAGE_QUEUE_BACKOFF_MS=5000
+```
+
+`docker-compose.scale.yml` routes scaled web containers through the bundled Nginx proxy and keeps image generation in Redis-backed workers. Target generation concurrency is roughly:
+
+```text
+worker replicas × IMAGE_WORKER_CONCURRENCY
+```
+
+For example, `4` worker containers with `IMAGE_WORKER_CONCURRENCY=4` target roughly `16` concurrent image jobs. Start by adding worker replicas before raising per-worker concurrency. Watch upstream 429s, failed job rate, Redis memory, CPU, RAM, and PostgreSQL connections before scaling further.
+
+The admin UI caps `Worker concurrency` at `64` per worker container. That is a per-process guardrail, not a whole-machine cap; total target concurrency is still worker replicas multiplied by per-worker concurrency.
 
 Run the migration container once before rolling scaled web replicas. The scaled web containers set `DB_MIGRATE_ON_START=false` so multiple replicas do not run Prisma migrations at the same time. Point one or more external domains at `${APP_PORT:-3000}` on the host; the bundled proxy forwards `Host` and `X-Forwarded-*` headers to the app.
+
+Useful scale checks:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.scale.yml logs --tail=120 image-2-worker
+curl http://127.0.0.1:3000/api/health
+```
+
+Connection budget:
+
+```text
+web replicas × DATABASE_CONNECTION_LIMIT
++ worker replicas × WORKER_DATABASE_CONNECTION_LIMIT
++ reserved migration/admin connections
+```
+
+Keep the bundled single-host PostgreSQL budget conservative, around `50` total connections to start. For higher sustained throughput, move to external PostgreSQL or a connection pool before continuing to add worker capacity.
 
 Production release flow:
 

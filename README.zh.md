@@ -154,15 +154,98 @@ docker compose logs -f image-2-worker
 
 ### 单机站群和并发扩容
 
-如果要让多个域名或单域名共用同一套数据库、Redis、storage 和 worker 池，使用扩容 overlay：
+如果要让多个域名或单域名共用同一套数据库、Redis、storage 和 worker 池，使用 `docker-compose.scale.yml` 扩容 overlay。这个方案适合“单台服务器先扩容”：数据库、Redis 和存储仍在同一台机器上，Web 容器可以横向增加，生图任务由多个 Worker 容器消费 Redis 队列。
+
+单机阶段的结构是：
+
+```text
+外层 1Panel / OpenResty / Nginx / CDN
+  -> 宿主机 APP_PORT
+  -> image-2-proxy
+  -> 多个 image-2-studio Web 容器
+  -> Redis 队列
+  -> 多个 image-2-worker Worker 容器
+
+共享资源：
+  PostgreSQL x 1
+  Redis x 1
+  ./storage:/app/storage x 1
+```
+
+关键原则：
+
+- 不为每个域名单独启动数据库、Redis 或 storage。
+- Web 容器只负责页面、登录、上传、入队和 API 响应，不直接承担当作主力的高并发生图。
+- Worker 容器负责真正调用上游模型生成图片。
+- 所有 Web 和 Worker 必须挂载同一个宿主机 `./storage`，否则生成图、缩略图、下载和导出会在不同容器之间不一致。
+- 跨机器扩容前必须先升级到对象存储、NFS 或其他共享存储方案。
+
+#### 1. 准备 `.env`
+
+先从 `.env.example` 复制并修改：
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+推荐起步配置：
+
+```env
+IMAGE_NAME=ghcr.io/paimonria/image-2-studio
+IMAGE_TAG=latest
+APP_PORT=3000
+
+POSTGRES_PASSWORD=replace-with-a-strong-postgres-password
+APP_SECRET=replace-with-at-least-32-random-characters
+INITIAL_ADMIN_EMAIL=admin@your-domain.com
+INITIAL_ADMIN_PASSWORD=replace-with-a-strong-admin-password
+
+WEB_REPLICAS=2
+WORKER_REPLICAS=4
+
+DATABASE_CONNECTION_LIMIT=5
+WORKER_DATABASE_CONNECTION_LIMIT=5
+MIGRATE_DATABASE_CONNECTION_LIMIT=5
+
+IMAGE_QUEUE_PREFIX=image2
+IMAGE_JOB_CONCURRENCY=2
+IMAGE_JOB_USER_CONCURRENCY=1
+IMAGE_WORKER_CONCURRENCY=4
+IMAGE_QUEUE_ATTEMPTS=3
+IMAGE_QUEUE_BACKOFF_MS=5000
+```
+
+说明：
+
+- `WEB_REPLICAS` / `WORKER_REPLICAS` 是默认副本数；实际执行 `--scale` 时可以覆盖。
+- `DATABASE_CONNECTION_LIMIT` 控制每个 Web 容器最多占用的 PostgreSQL 连接数。
+- `WORKER_DATABASE_CONNECTION_LIMIT` 控制每个 Worker 容器最多占用的 PostgreSQL 连接数。
+- `IMAGE_WORKER_CONCURRENCY` 是每个 Worker 容器内部同时处理的生图任务数。
+- 管理后台中的 `Worker 并发` 是单个 Worker 容器的并发上限，代码会限制在 `1..64`；单机总并发仍然要乘以 Worker 容器数，不是整台机器只能跑 64。
+- Docker 默认使用内置 Redis：`REDIS_URL=redis://redis:6379/0`。如果 `.env` 中留空，compose 会自动给 Web 和 Worker 注入内置 Redis 地址。
+
+如果使用外部 Redis：
+
+```env
+REDIS_URL=redis://:password@redis.example.com:6379/0
+# 如果服务商要求 TLS：
+REDIS_URL=rediss://:password@redis.example.com:6380/0
+```
+
+#### 2. 首次启动扩容栈
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.scale.yml --profile migrate run --rm image-2-migrate
-docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale image-2-studio=2 --scale image-2-worker=2
+docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale image-2-studio=2 --scale image-2-worker=4
 docker compose -f docker-compose.yml -f docker-compose.scale.yml ps
 ```
 
-`docker-compose.scale.yml` 会把 Web 容器放到内部网络，由 `image-2-proxy` 暴露 `${APP_PORT:-3000}`。宿主机上的 1Panel、OpenResty 或 Nginx 可以把多个域名都反向代理到这个端口：
+必须先运行一次 `image-2-migrate`。它只负责执行 Prisma migration，完成后退出。扩容模式下 Web 容器会设置 `DB_MIGRATE_ON_START=false`，避免多个 Web 副本同时迁移数据库。
+
+`docker-compose.scale.yml` 会把 Web 容器放到内部网络，由 `image-2-proxy` 暴露 `${APP_PORT:-3000}`。宿主机上的 1Panel、OpenResty 或 Nginx 可以把多个域名都反向代理到这个端口。
+
+#### 3. 外层反向代理
 
 ```text
 domain-a.com -> http://127.0.0.1:3000
@@ -170,41 +253,22 @@ domain-b.com -> http://127.0.0.1:3000
 admin.domain.com -> http://127.0.0.1:3000/admin
 ```
 
-扩容时先跑一次 migration 容器，再启动 Web/Worker。扩容 overlay 会让 Web 容器跳过启动迁移，避免多个 Web 副本同时执行 Prisma migration。`image-2-proxy` 会把 `Host`、`X-Forwarded-Proto`、`X-Forwarded-For` 等请求头继续传给应用；如果外层还有 1Panel/OpenResty/Nginx，只需要把域名统一反向代理到 `${APP_PORT:-3000}`。
-
-推荐起步参数：
-
-```env
-WEB_REPLICAS=2
-WORKER_REPLICAS=2
-DATABASE_CONNECTION_LIMIT=5
-WORKER_DATABASE_CONNECTION_LIMIT=5
-MIGRATE_DATABASE_CONNECTION_LIMIT=5
-IMAGE_WORKER_CONCURRENCY=4
-```
-
-并发估算：
+外层反代必须保留：
 
 ```text
-目标生图并发 ≈ image-2-worker 容器数 × IMAGE_WORKER_CONCURRENCY
+Host
+X-Forwarded-Proto
+X-Forwarded-For
+X-Real-IP
 ```
 
-例如 4 个 worker、每个 worker 并发 4，目标生图并发约为 16。先扩 worker 容器数，再提高单 worker 并发；如果出现供应商 429、超时或失败率升高，先降低 `IMAGE_WORKER_CONCURRENCY` 或减少 worker 数。
+HTTPS 建议在外层反代终止。上传和导出仍需要合理的 body size 与超时设置，建议外层保持不低于：
 
-单机站群阶段仍使用宿主机 `./storage` 作为共享目录，所有 Web 和 Worker 容器必须挂载同一个目录。跨机器扩容前需要先升级为对象存储、NFS 或其他共享存储方案。
-
-如果要缩容或调整副本数，直接重新执行 `up -d --scale`：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale image-2-studio=2 --scale image-2-worker=4
-```
-
-扩容后重点检查：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.scale.yml ps
-docker compose -f docker-compose.yml -f docker-compose.scale.yml logs --tail=120 image-2-worker
-curl http://127.0.0.1:3000/api/health
+```text
+client_max_body_size 12m
+proxy_connect_timeout 10s
+proxy_send_timeout 300s
+proxy_read_timeout 300s
 ```
 
 如果只是通过 `http://SERVER_IP:APP_PORT` 临时测试，可以加入：
@@ -214,6 +278,119 @@ AUTH_COOKIE_SECURE=false
 ```
 
 正式 HTTPS 部署不要设置 `AUTH_COOKIE_SECURE=false`。
+
+#### 4. 高并发档位建议
+
+目标生图并发的粗略计算：
+
+```text
+目标生图并发 ≈ image-2-worker 容器数 × IMAGE_WORKER_CONCURRENCY
+```
+
+推荐从低到高逐步调整：
+
+| 档位 | Web 容器 | Worker 容器 | 每 Worker 并发 | 目标生图并发 | 适用情况 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 轻量 | 1 | 2 | 2 | 约 4 | 小团队、低频使用 |
+| 标准 | 2 | 4 | 4 | 约 16 | 常规单机生产起步 |
+| 高并发 | 3 | 6 | 4 | 约 24 | 上游额度稳定、机器资源充足 |
+| 谨慎更高 | 3-4 | 8 | 4-6 | 约 32-48 | 需要持续观察数据库、Redis、CPU、内存和供应商限流 |
+
+不要一开始把 `IMAGE_WORKER_CONCURRENCY` 拉到很高。优先增加 Worker 容器数，再小幅提高单 Worker 并发。如果出现供应商 `429`、超时、失败率升高、Redis 内存快速上涨或 PostgreSQL 连接紧张，先降低 `IMAGE_WORKER_CONCURRENCY` 或减少 Worker 数。
+
+注意：后台可配置的 `Worker 并发` 最大值 `64` 是“每个 Worker 容器”的保护上限，防止误填超大值导致单进程打爆上游、数据库或内存。扩容模式下总并发按 Worker 容器数叠加，例如 4 个 Worker 且每个 16 并发，目标总并发约为 64；8 个 Worker 且每个 16 并发，目标总并发约为 128。是否能稳定跑满取决于上游限流、机器资源、Redis、PostgreSQL 和共享存储 IO。
+
+示例：
+
+```bash
+# 标准：2 Web + 4 Worker，目标生图并发约 16
+docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale image-2-studio=2 --scale image-2-worker=4
+
+# 高并发：3 Web + 6 Worker，目标生图并发约 24
+docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale image-2-studio=3 --scale image-2-worker=6
+```
+
+如果只改 `.env` 里的 `IMAGE_WORKER_CONCURRENCY`，需要重建 Worker 容器：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --force-recreate image-2-worker
+```
+
+如果在管理后台“队列与并发”里保存 Worker 并发，Worker 会轮询配置并自动重建运行时，不需要手动重启。
+
+#### 5. 数据库连接数预算
+
+多 Web + 多 Worker 后，PostgreSQL 连接数很容易先成为瓶颈。按下面公式估算：
+
+```text
+总连接预算 ≈ Web 容器数 × DATABASE_CONNECTION_LIMIT
+          + Worker 容器数 × WORKER_DATABASE_CONNECTION_LIMIT
+          + 迁移/维护预留连接
+```
+
+例如：
+
+```text
+3 Web × 5 + 6 Worker × 5 + 5 预留 = 50
+```
+
+单机内置 PostgreSQL 建议先把总连接控制在 `50` 左右。如果需要继续提高并发，优先考虑外部 PostgreSQL、连接池或更高规格数据库，而不是单纯继续增加 Worker。
+
+#### 6. 查看状态和健康检查
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.scale.yml ps
+docker compose -f docker-compose.yml -f docker-compose.scale.yml logs --tail=120 image-2-studio
+docker compose -f docker-compose.yml -f docker-compose.scale.yml logs --tail=120 image-2-worker
+curl http://127.0.0.1:3000/api/health
+```
+
+健康检查重点看：
+
+- `status` 是否为 `ok`。
+- `queueMode` 是否为 `redis`。
+- `jobQueue.queue.ok` 是否为 `true`。
+- `jobQueue.bullmq.waiting` / `active` 是否随任务提交变化。
+- `workerRuntimeVersion` 是否与后台队列配置更新后同步变化。
+- 管理后台“平台监控”中的失败率、平均排队、平均执行、供应商耗时和失败原因。
+
+#### 7. 常见问题
+
+Web 扩容时报端口冲突：
+
+- 必须使用 `docker-compose.scale.yml`。
+- 扩容模式下由 `image-2-proxy` 暴露宿主机端口，Web 容器不直接绑定 `${APP_PORT}`。
+
+任务一直等待：
+
+- 检查 `image-2-worker` 是否启动。
+- 检查 `/api/health` 中 `queueMode=redis`、`jobQueue.queue.ok=true`。
+- 检查 `REDIS_URL` 是否指向同一个 Redis。
+
+图片在某些容器里打不开：
+
+- 检查所有 Web 和 Worker 是否都挂载同一个 `./storage:/app/storage`。
+- 单机阶段不要为不同容器配置不同 storage 目录。
+
+数据库连接数耗尽：
+
+- 降低 `DATABASE_CONNECTION_LIMIT` 和 `WORKER_DATABASE_CONNECTION_LIMIT`。
+- 减少 Web/Worker 副本数。
+- 优先降低 Worker 数或 `IMAGE_WORKER_CONCURRENCY`。
+
+供应商限流或失败率升高：
+
+- 降低 `IMAGE_WORKER_CONCURRENCY`。
+- 减少 Worker 副本数。
+- 增大 `IMAGE_QUEUE_BACKOFF_MS` 或降低提交速度。
+
+#### 8. 缩容或调整副本
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale image-2-studio=2 --scale image-2-worker=4
+```
+
+降低副本数时也使用同一条 `up -d --scale` 命令。建议先减少 Worker，再减少 Web，避免正在处理的任务突然全部中断。
 
 ### 3. 使用内置 PostgreSQL 和 Redis 启动
 

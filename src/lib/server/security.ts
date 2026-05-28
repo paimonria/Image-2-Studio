@@ -12,6 +12,7 @@ type RateLimitBucket = {
 };
 
 export const DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024;
+export const DEFAULT_FORM_BODY_LIMIT_BYTES = 64 * 1024 * 1024;
 
 const rateLimitBuckets = new Map<string, RateLimitBucket>();
 
@@ -142,6 +143,17 @@ export async function readLimitedJsonBody<T = Record<string, unknown>>(
       : {} as T;
   } catch {
     return {} as T;
+  }
+}
+
+export function assertRequestContentLength(
+  request: Request,
+  maxBytes = DEFAULT_FORM_BODY_LIMIT_BYTES,
+  message = "Request body is too large."
+) {
+  const contentLength = Number.parseInt(request.headers.get("content-length") ?? "", 10);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new AppError(message, 413);
   }
 }
 
